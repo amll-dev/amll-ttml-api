@@ -97,49 +97,43 @@ pub struct LyricIndexDB {
     pub isrc_idx: HashMap<CompactString, Vec<usize>>,
 }
 
+#[derive(Default)]
 pub struct IdQuery {
-    pub ncm_music_id: Option<String>,
-    pub qq_music_id: Option<String>,
-    pub apple_music_id: Option<String>,
-    pub spotify_id: Option<String>,
+    pub ncm_music_ids: Vec<String>,
+    pub qq_music_ids: Vec<String>,
+    pub apple_music_ids: Vec<String>,
+    pub spotify_ids: Vec<String>,
 
-    pub isrc: Option<String>,
+    pub isrcs: Vec<String>,
 }
 
 impl IdQuery {
     pub fn from_http_query(pairs: &[(String, String)]) -> Option<Self> {
-        let mut query = Self {
-            ncm_music_id: None,
-            qq_music_id: None,
-            apple_music_id: None,
-            spotify_id: None,
-
-            isrc: None,
-        };
+        let mut query = Self::default();
         let mut has_param = false;
 
         for (k, v) in pairs {
-            let val = Some(v.clone());
+            let val = v.clone();
             match k.as_str() {
                 "ncmMusicId" => {
-                    query.ncm_music_id = val;
+                    query.ncm_music_ids.push(val);
                     has_param = true;
                 }
                 "qqMusicId" => {
-                    query.qq_music_id = val;
+                    query.qq_music_ids.push(val);
                     has_param = true;
                 }
                 "appleMusicId" => {
-                    query.apple_music_id = val;
+                    query.apple_music_ids.push(val);
                     has_param = true;
                 }
                 "spotifyId" => {
-                    query.spotify_id = val;
+                    query.spotify_ids.push(val);
                     has_param = true;
                 }
 
                 "isrc" => {
-                    query.isrc = val;
+                    query.isrcs.push(val);
                     has_param = true;
                 }
                 _ => {}

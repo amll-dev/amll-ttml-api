@@ -19,25 +19,25 @@ impl LyricIndexDB {
     pub fn find_by_ids(&self, query: &IdQuery) -> Vec<usize> {
         let mut candidates: Option<Vec<usize>> = None;
 
-        let mut apply_filter =
-            |id_opt: &Option<String>, idx_map: &HashMap<CompactString, Vec<usize>>| {
-                if let Some(id) = id_opt {
-                    let matched = idx_map.get(id.as_str()).cloned().unwrap_or_default();
-                    candidates = match candidates.take() {
-                        None => Some(matched),
-                        Some(mut existing) => {
-                            existing.retain(|x| matched.contains(x));
-                            Some(existing)
-                        }
-                    };
-                }
-            };
+        let mut apply_filter = |ids: &[String], idx_map: &HashMap<CompactString, Vec<usize>>| {
+            for id in ids {
+                let matched = idx_map.get(id.as_str()).cloned().unwrap_or_default();
 
-        apply_filter(&query.ncm_music_id, &self.ncm_idx);
-        apply_filter(&query.qq_music_id, &self.qq_idx);
-        apply_filter(&query.apple_music_id, &self.apple_idx);
-        apply_filter(&query.spotify_id, &self.spotify_idx);
-        apply_filter(&query.isrc, &self.isrc_idx);
+                candidates = match candidates.take() {
+                    None => Some(matched),
+                    Some(mut existing) => {
+                        existing.retain(|x| matched.contains(x));
+                        Some(existing)
+                    }
+                };
+            }
+        };
+
+        apply_filter(&query.ncm_music_ids, &self.ncm_idx);
+        apply_filter(&query.qq_music_ids, &self.qq_idx);
+        apply_filter(&query.apple_music_ids, &self.apple_idx);
+        apply_filter(&query.spotify_ids, &self.spotify_idx);
+        apply_filter(&query.isrcs, &self.isrc_idx);
 
         let mut result = candidates.unwrap_or_default();
         result.sort_unstable();
