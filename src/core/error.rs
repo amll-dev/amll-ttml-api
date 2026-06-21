@@ -1,0 +1,53 @@
+use serde::Serialize;
+use worker::{
+    Response,
+    Result,
+};
+
+#[derive(Debug)]
+pub enum AppError {
+    WorkerError(worker::Error),
+    JsonError(serde_json::Error),
+    BadRequest(String),
+    UpstreamError(String),
+}
+
+impl From<worker::Error> for AppError {
+    fn from(err: worker::Error) -> Self {
+        Self::WorkerError(err)
+    }
+}
+
+impl From<serde_json::Error> for AppError {
+    fn from(err: serde_json::Error) -> Self {
+        Self::JsonError(err)
+    }
+}
+
+#[derive(Serialize)]
+struct ErrorPayload {
+    status: u16,
+    error: &'static str,
+    message: String,
+}
+
+impl AppError {
+    pub fn to_response(&self) -> Result<Response> {
+        let (status, error_str, message) = match self {
+            Self::BadRequest(msg) => (400, "Bad Request", msg.clone()),
+            Self::UpstreamError(msg) => (502, "Bad Gateway", msg.clone()),
+            Self::WorkerError(err) => (500, "Internal Server Error", err.to_string()),
+            Self::JsonError(err) => (500, "Internal Server Error", err.to_string()),
+        };
+
+        let payload = ErrorPayload {
+            status,
+            error: error_str,
+            message,
+        };
+
+        let mut res = Response::from_json(&payload)?;
+        res.headers_mut().set("Access-Control-Allow-Origin", "*")?;
+        Ok(res.with_status(status))
+    }
+}
