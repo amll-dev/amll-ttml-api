@@ -88,7 +88,7 @@ paths:
           required: false
           schema:
             type: string
-          description: 全局搜索，模糊包含，命中曲名、歌手、专辑其一即可。
+          description: 模糊搜索，可组合歌曲名、歌手名和专辑名传入
         # 曲名匹配及别名
         - name: musicNames
           in: query

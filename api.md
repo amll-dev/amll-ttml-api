@@ -133,22 +133,23 @@
 
 至少需要提供以下任意一个参数。如果提供多个参数，将使用交集 (AND) 匹配。
 
-| 参数名                  | 别名 / 兼容参数                                                               | 类型     | 必填 | 匹配逻辑 | 说明                                   |
-| ----------------------- | ----------------------------------------------------------------------------- | -------- | ---- | -------- | -------------------------------------- |
-| `q`                     | -                                                                             | `string` | 否   | 模糊包含 | 全局搜索，命中曲名、歌手、专辑其一即可 |
-| `musicNames`            | `trackNames` / `trackName` / `track_name` / `track_names`                     | `string` | 否   | 模糊包含 | 限定匹配曲名                           |
-| `artistNames`           | `artists` / `artistName` / `artist_name` / `artist_names`                     | `string` | 否   | 模糊包含 | 限定匹配歌手名                         |
-| `albumNames`            | `album` / `albumName` / `album_name` / `album_names`                          | `string` | 否   | 模糊包含 | 限定匹配专辑名                         |
-| `ttmlAuthorGithub`      | `authorIds` / `authorId` / `author_id` / `author_ids`                         | `string` | 否   | 严格全等 | TTML 贡献者的 GitHub ID                |
-| `ttmlAuthorGithubLogin` | `authorUserNames` / `authorUserName` / `author_username` / `author_usernames` | `string` | 否   | 严格全等 | TTML 贡献者的 GitHub 用户名            |
+| 参数名                  | 别名 / 兼容参数                                                               | 类型     | 必填 | 匹配逻辑 | 说明                                       |
+| ----------------------- | ----------------------------------------------------------------------------- | -------- | ---- | -------- | ------------------------------------------ |
+| `q`                     | -                                                                             | `string` | 否   | 模糊包含 | 模糊搜索，可组合歌曲名、歌手名和专辑名传入 |
+| `musicNames`            | `trackNames` / `trackName` / `track_name` / `track_names`                     | `string` | 否   | 模糊包含 | 限定匹配曲名                               |
+| `artistNames`           | `artists` / `artistName` / `artist_name` / `artist_names`                     | `string` | 否   | 模糊包含 | 限定匹配歌手名                             |
+| `albumNames`            | `album` / `albumName` / `album_name` / `album_names`                          | `string` | 否   | 模糊包含 | 限定匹配专辑名                             |
+| `ttmlAuthorGithub`      | `authorIds` / `authorId` / `author_id` / `author_ids`                         | `string` | 否   | 严格全等 | TTML 贡献者的 GitHub ID                    |
+| `ttmlAuthorGithubLogin` | `authorUserNames` / `authorUserName` / `author_username` / `author_usernames` | `string` | 否   | 严格全等 | TTML 贡献者的 GitHub 用户名                |
 
 #### 注意事项
 
-1. 如果未提供任何合法参数，将返回 `400 Bad Request`。
-2. 文本字段采用忽略大小写的 ASCII 包含匹配，作者字段采用严格全等匹配。
-3. 结果按照时间戳降序排序。
-4. 最多返回前 **50** 条记录。
-5. `syncedLyrics` 始终为 `null`。你需要使用 `/api/get` 来获取歌词内容。
+1. 建议使用 `musicNames`、`artistNames` 或 `albumNames` 进行搜索以提高精确度。
+2. 如果未提供任何合法参数，将返回 `400 Bad Request`。
+3. 文本字段采用忽略大小写的 ASCII 包含匹配，作者字段采用严格全等匹配。
+4. 结果按照时间戳降序排序。
+5. 最多返回前 **50** 条记录。
+6. `syncedLyrics` 始终为 `null`。你需要使用 `/api/get` 来获取歌词内容。
 
 #### 响应示例
 

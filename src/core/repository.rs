@@ -9,7 +9,12 @@ use crate::{
         SearchQuery,
         SongEntry,
     },
-    utils::string::contains_ignore_ascii_case,
+    utils::matcher::{
+        MatchType,
+        PreparedQuery,
+        rough_match,
+        score_entry,
+    },
 };
 
 impl LyricIndexDB {
@@ -47,70 +52,24 @@ impl LyricIndexDB {
 
     /// 用于 /api/get，多字段或模糊搜索，支持字段交集
     pub fn search_by_fields(&self, query: &SearchQuery) -> Vec<&SongEntry> {
-        let mut results = Vec::new();
+        let prepared = PreparedQuery::from_search_query(query);
 
-        for entry in &self.entries {
-            if let Some(ref q) = query.global_keyword {
-                let match_track = entry
-                    .track_names
-                    .iter()
-                    .any(|n| contains_ignore_ascii_case(n.as_str(), q));
-                let match_artist = entry
-                    .artist_names
-                    .iter()
-                    .any(|n| contains_ignore_ascii_case(n.as_str(), q));
-                let match_album = entry
-                    .album_names
-                    .iter()
-                    .any(|n| contains_ignore_ascii_case(n.as_str(), q));
-                if !(match_track || match_artist || match_album) {
-                    continue;
-                }
-            }
+        let mut scored_results: Vec<(&SongEntry, MatchType)> = self
+            .entries
+            .iter()
+            .filter(|entry| rough_match(&prepared, entry))
+            .map(|entry| {
+                let score = score_entry(query, entry);
+                (entry, score)
+            })
+            .filter(|(_, score)| *score > MatchType::NoMatch)
+            .collect();
 
-            // 具体字段的过滤为包含和 AND 关系
-            if let Some(ref val) = query.track_name
-                && !entry
-                    .track_names
-                    .iter()
-                    .any(|n| contains_ignore_ascii_case(n.as_str(), val))
-            {
-                continue;
-            }
+        scored_results.sort_unstable_by(|a, b| {
+            b.1.cmp(&a.1)
+                .then_with(|| b.0.timestamp.cmp(&a.0.timestamp))
+        });
 
-            if let Some(ref val) = query.artist_name
-                && !entry
-                    .artist_names
-                    .iter()
-                    .any(|n| contains_ignore_ascii_case(n.as_str(), val))
-            {
-                continue;
-            }
-
-            if let Some(ref val) = query.album_name
-                && !entry
-                    .album_names
-                    .iter()
-                    .any(|n| contains_ignore_ascii_case(n.as_str(), val))
-            {
-                continue;
-            }
-
-            // ID 和用户名严格相等才算匹配
-            if let Some(ref val) = query.author_id
-                && !entry.author_ids.iter().any(|n| n.as_str() == val)
-            {
-                continue;
-            }
-            if let Some(ref val) = query.author_username
-                && !entry.author_usernames.iter().any(|n| n.as_str() == val)
-            {
-                continue;
-            }
-
-            results.push(entry);
-        }
-
-        results
+        scored_results.into_iter().map(|(entry, _)| entry).collect()
     }
 }

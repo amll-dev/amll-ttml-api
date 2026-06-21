@@ -32,7 +32,6 @@ impl LyricService {
 
         drop(state);
 
-        songs_cloned.sort_by_key(|b| std::cmp::Reverse(b.timestamp));
         songs_cloned.truncate(limit);
 
         let results_dto: Vec<ApiResponseEntry> = songs_cloned
