@@ -1,0 +1,382 @@
+openapi: 3.2.0
+info:
+  title: AMLL TTML API
+  version: 1.0.0
+  description: |
+    AMLL TTML API 接口文档。
+
+    **基础信息**
+    * **协议**: HTTP/HTTPS
+    * **内容类型**: `application/json`
+    * **CORS**: 允许跨域 (`Access-Control-Allow-Origin: *`)
+servers:
+  - url: /
+paths:
+  /api/get:
+    get:
+      summary: 获取歌词
+      description: 通过唯一的 ID 获取一首歌曲的元数据及其完整的 TTML 歌词。至少需要提供以下任意一个参数。如果提供多个不同平台的参数，或为同一平台提供多个 ID，将使用交集 (AND) 进行匹配。
+      parameters:
+        - name: ncmMusicId
+          in: query
+          required: false
+          schema:
+            type: string
+          description: 网易云音乐 ID
+        - name: qqMusicId
+          in: query
+          required: false
+          schema:
+            type: string
+          description: QQ 音乐 ID
+        - name: appleMusicId
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Apple Music ID
+        - name: spotifyId
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Spotify ID
+        - name: isrc
+          in: query
+          required: false
+          schema:
+            type: string
+          description: ISRC 编码
+      responses:
+        "200":
+          description: 成功（返回长度为 0 或 1 的数组）
+          content:
+            application/json:
+              schema:
+                type: array
+                maxItems: 1
+                items:
+                  $ref: "#/components/schemas/SongMetadata"
+        "400":
+          description: 参数验证失败（未传入任何有效请求参数）
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "502":
+          description: 网关错误（未能从 GitHub 获取到 TTML 原文 / 索引数据库更新失败）
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/search:
+    get:
+      summary: 搜索歌词
+      description: |
+        在词库中搜索符合条件的歌词。至少需要提供一个参数。如果提供多个参数，将使用交集 (AND) 匹配。
+
+        **注意事项**：
+        1. 文本字段采用忽略大小写的 ASCII 包含匹配，作者字段采用严格全等匹配。
+        2. 结果按照时间戳降序排序。
+        3. 最多返回前 50 条记录。
+        4. `syncedLyrics` 始终为 `null`。你需要使用 `/api/get` 来获取歌词内容。
+      parameters:
+        # 全局搜索
+        - name: q
+          in: query
+          required: false
+          schema:
+            type: string
+          description: 全局搜索，模糊包含，命中曲名、歌手、专辑其一即可。
+        # 曲名匹配及别名
+        - name: musicNames
+          in: query
+          required: false
+          schema:
+            type: string
+          description: 限定匹配曲名（模糊包含）
+        - name: trackNames
+          in: query
+          required: false
+          schema:
+            type: string
+          description: 限定匹配曲名（musicNames 的兼容别名）
+        - name: trackName
+          in: query
+          required: false
+          schema:
+            type: string
+          description: 限定匹配曲名（musicNames 的兼容别名）
+        - name: track_name
+          in: query
+          required: false
+          schema:
+            type: string
+          description: 限定匹配曲名（musicNames 的兼容别名）
+        - name: track_names
+          in: query
+          required: false
+          schema:
+            type: string
+          description: 限定匹配曲名（musicNames 的兼容别名）
+        # 歌手匹配及别名
+        - name: artistNames
+          in: query
+          required: false
+          schema:
+            type: string
+          description: 限定匹配歌手名（模糊包含）
+        - name: artists
+          in: query
+          required: false
+          schema:
+            type: string
+          description: 限定匹配歌手名（artistNames 的兼容别名）
+        - name: artistName
+          in: query
+          required: false
+          schema:
+            type: string
+          description: 限定匹配歌手名（artistNames 的兼容别名）
+        - name: artist_name
+          in: query
+          required: false
+          schema:
+            type: string
+          description: 限定匹配歌手名（artistNames 的兼容别名）
+        - name: artist_names
+          in: query
+          required: false
+          schema:
+            type: string
+          description: 限定匹配歌手名（artistNames 的兼容别名）
+        # 专辑匹配及别名
+        - name: albumNames
+          in: query
+          required: false
+          schema:
+            type: string
+          description: 限定匹配专辑名（模糊包含）
+        - name: album
+          in: query
+          required: false
+          schema:
+            type: string
+          description: 限定匹配专辑名（albumNames 的兼容别名）
+        - name: albumName
+          in: query
+          required: false
+          schema:
+            type: string
+          description: 限定匹配专辑名（albumNames 的兼容别名）
+        - name: album_name
+          in: query
+          required: false
+          schema:
+            type: string
+          description: 限定匹配专辑名（albumNames 的兼容别名）
+        - name: album_names
+          in: query
+          required: false
+          schema:
+            type: string
+          description: 限定匹配专辑名（albumNames 的兼容别名）
+        # GitHub ID 匹配及别名
+        - name: ttmlAuthorGithub
+          in: query
+          required: false
+          schema:
+            type: string
+          description: TTML 贡献者的 GitHub ID（严格全等）
+        - name: authorIds
+          in: query
+          required: false
+          schema:
+            type: string
+          description: TTML 贡献者的 GitHub ID（ttmlAuthorGithub 的兼容别名）
+        - name: authorId
+          in: query
+          required: false
+          schema:
+            type: string
+          description: TTML 贡献者的 GitHub ID（ttmlAuthorGithub 的兼容别名）
+        - name: author_id
+          in: query
+          required: false
+          schema:
+            type: string
+          description: TTML 贡献者的 GitHub ID（ttmlAuthorGithub 的兼容别名）
+        - name: author_ids
+          in: query
+          required: false
+          schema:
+            type: string
+          description: TTML 贡献者的 GitHub ID（ttmlAuthorGithub 的兼容别名）
+        # GitHub 用户名匹配及别名
+        - name: ttmlAuthorGithubLogin
+          in: query
+          required: false
+          schema:
+            type: string
+          description: TTML 贡献者的 GitHub 用户名（严格全等）
+        - name: authorUserNames
+          in: query
+          required: false
+          schema:
+            type: string
+          description: TTML 贡献者的 GitHub 用户名（ttmlAuthorGithubLogin 的兼容别名）
+        - name: authorUserName
+          in: query
+          required: false
+          schema:
+            type: string
+          description: TTML 贡献者的 GitHub 用户名（ttmlAuthorGithubLogin 的兼容别名）
+        - name: author_username
+          in: query
+          required: false
+          schema:
+            type: string
+          description: TTML 贡献者的 GitHub 用户名（ttmlAuthorGithubLogin 的兼容别名）
+        - name: author_usernames
+          in: query
+          required: false
+          schema:
+            type: string
+          description: TTML 贡献者的 GitHub 用户名（ttmlAuthorGithubLogin 的兼容别名）
+      responses:
+        "200":
+          description: 成功（最多返回前 50 条记录，且 syncedLyrics 始终为 null）
+          content:
+            application/json:
+              schema:
+                type: array
+                maxItems: 50
+                items:
+                  $ref: "#/components/schemas/SongMetadata"
+        "400":
+          description: 参数验证失败（未传入任何有效请求参数）
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "502":
+          description: 内部错误
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+components:
+  schemas:
+    SongMetadata:
+      type: object
+      required:
+        - filename
+        - trackNames
+        - artistNames
+        - albumNames
+        - ncmMusicIds
+        - qqMusicIds
+        - appleMusicIds
+        - spotifyIds
+        - isrcs
+        - authorIds
+        - authorUsernames
+        - syncedLyrics
+        - plainLyrics
+      properties:
+        filename:
+          type: string
+          description: 歌词文件名
+          example: "1768754400682-250306205-r6IrpmBd.ttml"
+        trackNames:
+          type: array
+          items:
+            type: string
+          description: 歌曲名列表
+          example: ["ME!", "ME! (feat. Brendon Urie of Panic! At The Disco)"]
+        artistNames:
+          type: array
+          items:
+            type: string
+          description: 歌手名列表
+          example: ["Brendon Urie", "Taylor Swift"]
+        albumNames:
+          type: array
+          items:
+            type: string
+          description: 专辑名列表
+          example: ["Lover"]
+        ncmMusicIds:
+          type: array
+          items:
+            type: string
+          description: 网易云音乐平台 ID 列表
+          example: ["1361348080", "1382781549"]
+        qqMusicIds:
+          type: array
+          items:
+            type: string
+          description: QQ 音乐平台 ID 列表
+          example: ["0032UZe62rZk9K"]
+        appleMusicIds:
+          type: array
+          items:
+            type: string
+          description: Apple Music 平台 ID 列表
+          example: ["1468058706"]
+        spotifyIds:
+          type: array
+          items:
+            type: string
+          description: Spotify 平台 ID 列表
+          example: ["2Rk4JlNc2TPmZe2af99d45"]
+        isrcs:
+          type: array
+          items:
+            type: string
+          description: ISRC 国际标准音像制品编码列表
+          example: ["USUG11901494"]
+        authorIds:
+          type: array
+          items:
+            type: string
+          description: TTML 歌词贡献者的 GitHub ID 列表
+          example: ["108002475", "250306205"]
+        authorUsernames:
+          type: array
+          items:
+            type: string
+          description: TTML 歌词贡献者的 GitHub 用户名列表
+          example: ["SteamFinder", "apoint123"]
+        syncedLyrics:
+          type: string
+          nullable: true
+          description: TTML 格式的歌词。在 `/api/search` 中始终为 `null`。
+          example: "ttml字符串..."
+        plainLyrics:
+          type: string
+          nullable: true
+          description: 纯文本歌词（预留字段，当前为 `null`）
+          example: null
+
+    ErrorResponse:
+      type: object
+      required:
+        - status
+        - error
+        - message
+      properties:
+        status:
+          type: integer
+          description: HTTP 状态码
+          example: 400
+        error:
+          type: string
+          description: 错误简述
+          example: "Bad Request"
+        message:
+          type: string
+          description: 详细的错误原因说明
+          example: "Missing required query parameters."

@@ -2,6 +2,10 @@
 name = "amll-ttml-api"
 version = "0.1.0"
 edition = "2024"
+license = "MIT OR Apache-2.0"
+description = "AMLL TTML DataBase API 服务，提供 TTML 格式歌词的获取与搜索功能"
+repository = "https://github.com/amll-dev/amll-ttml-api"
+homepage = "https://github.com/amll-dev/amll-ttml-api"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
