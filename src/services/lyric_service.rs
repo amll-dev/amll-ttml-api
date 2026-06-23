@@ -28,11 +28,9 @@ impl LyricService {
     ) -> Result<Vec<ApiResponseEntry>, AppError> {
         let state = acquire_db_read_lock(ctx).await?;
         let matched_songs = state.db.search_by_fields(&query);
-        let mut songs_cloned: Vec<_> = matched_songs.into_iter().cloned().collect();
+        let songs_cloned: Vec<_> = matched_songs.into_iter().take(limit).cloned().collect();
 
         drop(state);
-
-        songs_cloned.truncate(limit);
 
         let results_dto: Vec<ApiResponseEntry> = songs_cloned
             .iter()
