@@ -107,43 +107,6 @@ pub struct IdQuery {
     pub isrcs: Vec<String>,
 }
 
-impl IdQuery {
-    pub fn from_http_query(pairs: &[(String, String)]) -> Option<Self> {
-        let mut query = Self::default();
-        let mut has_param = false;
-
-        for (k, v) in pairs {
-            let val = v.clone();
-            match k.as_str() {
-                "ncmMusicId" => {
-                    query.ncm_music_ids.push(val);
-                    has_param = true;
-                }
-                "qqMusicId" => {
-                    query.qq_music_ids.push(val);
-                    has_param = true;
-                }
-                "appleMusicId" => {
-                    query.apple_music_ids.push(val);
-                    has_param = true;
-                }
-                "spotifyId" => {
-                    query.spotify_ids.push(val);
-                    has_param = true;
-                }
-
-                "isrc" => {
-                    query.isrcs.push(val);
-                    has_param = true;
-                }
-                _ => {}
-            }
-        }
-
-        if has_param { Some(query) } else { None }
-    }
-}
-
 #[derive(Default)]
 pub struct SearchQuery {
     pub global_keyword: Option<String>,
@@ -154,50 +117,4 @@ pub struct SearchQuery {
 
     pub author_id: Option<String>,
     pub author_username: Option<String>,
-}
-
-impl SearchQuery {
-    pub fn from_http_query(pairs: &[(String, String)]) -> Option<Self> {
-        let mut query = Self::default();
-        let mut has_param = false;
-
-        for (k, v) in pairs {
-            let val = Some(v.clone());
-            match k.as_str() {
-                "q" => {
-                    query.global_keyword = val;
-                    has_param = true;
-                }
-
-                "musicName" | "trackNames" | "trackName" | "track_name" | "track_names" => {
-                    query.track_name = val;
-                    has_param = true;
-                }
-                "artists" | "artistNames" | "artistName" | "artist_name" | "artist_names" => {
-                    query.artist_name = val;
-                    has_param = true;
-                }
-                "album" | "albumNames" | "albumName" | "album_name" | "album_names" => {
-                    query.album_name = val;
-                    has_param = true;
-                }
-
-                "ttmlAuthorGithub" | "authorIds" | "authorId" | "author_id" | "author_ids" => {
-                    query.author_id = val;
-                    has_param = true;
-                }
-                "ttmlAuthorGithubLogin"
-                | "authorUserNames"
-                | "authorUserName"
-                | "author_username"
-                | "author_usernames" => {
-                    query.author_username = val;
-                    has_param = true;
-                }
-                _ => {}
-            }
-        }
-
-        if has_param { Some(query) } else { None }
-    }
 }

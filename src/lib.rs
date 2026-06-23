@@ -25,6 +25,10 @@ pub async fn main(req: Request, env: Env, ctx: worker::Context) -> worker::Resul
     router = router.get_async("/api/get", api::get::handler::handle_get);
     router = router.get_async("/api/search", api::search::handler::handle_search);
 
+    router = router.or_else_any_method_async("/", |_req, _ctx| async move {
+        AppError::NotFound.to_response()
+    });
+
     router = router.or_else_any_method_async("/*catchall", |_req, _ctx| async move {
         AppError::NotFound.to_response()
     });

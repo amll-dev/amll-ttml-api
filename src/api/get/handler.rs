@@ -5,10 +5,8 @@ use worker::{
 };
 
 use crate::{
-    core::{
-        error::AppError,
-        models::IdQuery,
-    },
+    api::get::extractor::extract_id_query,
+    core::error::AppError,
     services::lyric_service::LyricService,
 };
 
@@ -27,13 +25,8 @@ async fn handle_get_inner(
     ctx: RouteContext<worker::Context>,
 ) -> Result<Response, AppError> {
     let url = req.url()?;
-    let query_pairs: Vec<(String, String)> = url
-        .query_pairs()
-        .map(|(k, v)| (k.into_owned(), v.into_owned()))
-        .collect();
 
-    let query = IdQuery::from_http_query(&query_pairs)
-        .ok_or_else(|| AppError::BadRequest("Only valid query parameters are allowed.".into()))?;
+    let query = extract_id_query(&url)?;
 
     let result = LyricService::get_lyric(&ctx, query).await?;
     Ok({ Response::from_json(&result) }?)

@@ -5,10 +5,8 @@ use worker::{
 };
 
 use crate::{
-    core::{
-        error::AppError,
-        models::SearchQuery,
-    },
+    api::search::extractor::extract_search_query,
+    core::error::AppError,
     services::lyric_service::LyricService,
 };
 
@@ -27,13 +25,8 @@ async fn handle_search_inner(
     ctx: RouteContext<worker::Context>,
 ) -> Result<Response, AppError> {
     let url = req.url()?;
-    let query_pairs: Vec<(String, String)> = url
-        .query_pairs()
-        .map(|(k, v)| (k.into_owned(), v.into_owned()))
-        .collect();
 
-    let query = SearchQuery::from_http_query(&query_pairs)
-        .ok_or_else(|| AppError::BadRequest("Missing valid search parameters.".into()))?;
+    let query = extract_search_query(&url)?;
 
     let max_results = 50;
     let result = LyricService::search_lyric(&ctx, query, max_results).await?;
