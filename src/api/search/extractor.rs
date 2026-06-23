@@ -16,7 +16,7 @@ pub fn extract_search_query(url: &Url) -> Result<SearchQuery, AppError> {
                 query.global_keyword = val;
                 has_param = true;
             }
-            "trackName" => {
+            "musicName" => {
                 query.track_name = val;
                 has_param = true;
             }

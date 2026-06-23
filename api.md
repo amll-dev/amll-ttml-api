@@ -133,18 +133,18 @@
 
 至少需要提供以下任意一个参数。如果提供多个参数，将使用交集 (AND) 匹配。
 
-| 参数名                  | 别名 / 兼容参数                                                               | 类型     | 必填 | 匹配逻辑 | 说明                                       |
-| ----------------------- | ----------------------------------------------------------------------------- | -------- | ---- | -------- | ------------------------------------------ |
-| `q`                     | -                                                                             | `string` | 否   | 模糊包含 | 模糊搜索，可组合歌曲名、歌手名和专辑名传入 |
-| `musicNames`            | `trackNames` / `trackName` / `track_name` / `track_names`                     | `string` | 否   | 模糊包含 | 限定匹配曲名                               |
-| `artistNames`           | `artists` / `artistName` / `artist_name` / `artist_names`                     | `string` | 否   | 模糊包含 | 限定匹配歌手名                             |
-| `albumNames`            | `album` / `albumName` / `album_name` / `album_names`                          | `string` | 否   | 模糊包含 | 限定匹配专辑名                             |
-| `ttmlAuthorGithub`      | `authorIds` / `authorId` / `author_id` / `author_ids`                         | `string` | 否   | 严格全等 | TTML 贡献者的 GitHub ID                    |
-| `ttmlAuthorGithubLogin` | `authorUserNames` / `authorUserName` / `author_username` / `author_usernames` | `string` | 否   | 严格全等 | TTML 贡献者的 GitHub 用户名                |
+| 参数名           | 类型     | 必填 | 匹配逻辑 | 说明                                       |
+| ---------------- | -------- | ---- | -------- | ------------------------------------------ |
+| `q`              | `string` | 否   | 模糊包含 | 模糊搜索，可组合歌曲名、歌手名和专辑名传入 |
+| `musicName`      | `string` | 否   | 模糊包含 | 限定匹配曲名                               |
+| `artistName`     | `string` | 否   | 模糊包含 | 限定匹配歌手名                             |
+| `albumName`      | `string` | 否   | 模糊包含 | 限定匹配专辑名                             |
+| `authorId`       | `string` | 否   | 严格全等 | TTML 贡献者的 GitHub ID                    |
+| `authorUsername` | `string` | 否   | 严格全等 | TTML 贡献者的 GitHub 用户名                |
 
 #### 注意事项
 
-1. 建议使用 `musicNames`、`artistNames` 或 `albumNames` 进行搜索以提高精确度。
+1. 建议使用 `musicName`、`artistName` 或 `albumName` 而不是 `q` 进行搜索以提高精确度。
 2. 如果未提供任何合法参数，将返回 `400 Bad Request`。
 3. 文本字段采用忽略大小写的 ASCII 包含匹配，作者字段采用严格全等匹配。
 4. 结果按照时间戳降序排序。

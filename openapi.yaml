@@ -89,161 +89,41 @@ paths:
           schema:
             type: string
           description: 模糊搜索，可组合歌曲名、歌手名和专辑名传入
-        # 曲名匹配及别名
-        - name: musicNames
+        # 曲名匹配
+        - name: musicName
           in: query
           required: false
           schema:
             type: string
           description: 限定匹配曲名（模糊包含）
-        - name: trackNames
-          in: query
-          required: false
-          schema:
-            type: string
-          description: 限定匹配曲名（musicNames 的兼容别名）
-        - name: trackName
-          in: query
-          required: false
-          schema:
-            type: string
-          description: 限定匹配曲名（musicNames 的兼容别名）
-        - name: track_name
-          in: query
-          required: false
-          schema:
-            type: string
-          description: 限定匹配曲名（musicNames 的兼容别名）
-        - name: track_names
-          in: query
-          required: false
-          schema:
-            type: string
-          description: 限定匹配曲名（musicNames 的兼容别名）
-        # 歌手匹配及别名
-        - name: artistNames
-          in: query
-          required: false
-          schema:
-            type: string
-          description: 限定匹配歌手名（模糊包含）
-        - name: artists
-          in: query
-          required: false
-          schema:
-            type: string
-          description: 限定匹配歌手名（artistNames 的兼容别名）
+        # 歌手匹配
         - name: artistName
           in: query
           required: false
           schema:
             type: string
-          description: 限定匹配歌手名（artistNames 的兼容别名）
-        - name: artist_name
-          in: query
-          required: false
-          schema:
-            type: string
-          description: 限定匹配歌手名（artistNames 的兼容别名）
-        - name: artist_names
-          in: query
-          required: false
-          schema:
-            type: string
-          description: 限定匹配歌手名（artistNames 的兼容别名）
-        # 专辑匹配及别名
-        - name: albumNames
-          in: query
-          required: false
-          schema:
-            type: string
-          description: 限定匹配专辑名（模糊包含）
-        - name: album
-          in: query
-          required: false
-          schema:
-            type: string
-          description: 限定匹配专辑名（albumNames 的兼容别名）
+          description: 限定匹配歌手名（模糊包含）
+        # 专辑匹配
         - name: albumName
           in: query
           required: false
           schema:
             type: string
-          description: 限定匹配专辑名（albumNames 的兼容别名）
-        - name: album_name
-          in: query
-          required: false
-          schema:
-            type: string
-          description: 限定匹配专辑名（albumNames 的兼容别名）
-        - name: album_names
-          in: query
-          required: false
-          schema:
-            type: string
-          description: 限定匹配专辑名（albumNames 的兼容别名）
-        # GitHub ID 匹配及别名
-        - name: ttmlAuthorGithub
-          in: query
-          required: false
-          schema:
-            type: string
-          description: TTML 贡献者的 GitHub ID（严格全等）
-        - name: authorIds
-          in: query
-          required: false
-          schema:
-            type: string
-          description: TTML 贡献者的 GitHub ID（ttmlAuthorGithub 的兼容别名）
+          description: 限定匹配专辑名（模糊包含）
+        # 歌词作者 GitHub ID 匹配
         - name: authorId
           in: query
           required: false
           schema:
             type: string
-          description: TTML 贡献者的 GitHub ID（ttmlAuthorGithub 的兼容别名）
-        - name: author_id
+          description: 歌词作者 GitHub ID（严格全等）
+        # 歌词作者 GitHub 用户名匹配
+        - name: authorUsername
           in: query
           required: false
           schema:
             type: string
-          description: TTML 贡献者的 GitHub ID（ttmlAuthorGithub 的兼容别名）
-        - name: author_ids
-          in: query
-          required: false
-          schema:
-            type: string
-          description: TTML 贡献者的 GitHub ID（ttmlAuthorGithub 的兼容别名）
-        # GitHub 用户名匹配及别名
-        - name: ttmlAuthorGithubLogin
-          in: query
-          required: false
-          schema:
-            type: string
-          description: TTML 贡献者的 GitHub 用户名（严格全等）
-        - name: authorUserNames
-          in: query
-          required: false
-          schema:
-            type: string
-          description: TTML 贡献者的 GitHub 用户名（ttmlAuthorGithubLogin 的兼容别名）
-        - name: authorUserName
-          in: query
-          required: false
-          schema:
-            type: string
-          description: TTML 贡献者的 GitHub 用户名（ttmlAuthorGithubLogin 的兼容别名）
-        - name: author_username
-          in: query
-          required: false
-          schema:
-            type: string
-          description: TTML 贡献者的 GitHub 用户名（ttmlAuthorGithubLogin 的兼容别名）
-        - name: author_usernames
-          in: query
-          required: false
-          schema:
-            type: string
-          description: TTML 贡献者的 GitHub 用户名（ttmlAuthorGithubLogin 的兼容别名）
+          description: 歌词作者 GitHub 用户名（严格全等）
       responses:
         "200":
           description: 成功（最多返回前 50 条记录，且 syncedLyrics 始终为 null）
