@@ -3,7 +3,6 @@ use std::{
     sync::OnceLock,
 };
 
-use compact_str::CompactString;
 use ferrous_opencc::{
     OpenCC,
     config::BuiltinConfig,
@@ -94,14 +93,14 @@ const SCORE_THRESHOLDS: &[(f64, MatchType)] = &[
     (2.5, MatchType::VeryLow),
 ];
 
-pub fn score_entry(query: &SearchQuery, entry: &SongEntry) -> MatchType {
+pub fn score_entry(query: &PreparedQuery, entry: &SongEntry) -> MatchType {
     if query.track_name.is_none()
         && query.artist_name.is_none()
         && query.album_name.is_none()
         && query.global_keyword.is_some()
     {
-        let q_raw = query.global_keyword.as_deref().unwrap();
-        return score_global_keyword(q_raw, entry);
+        let q_norm = query.global_keyword.as_deref().unwrap();
+        return score_global_keyword(q_norm, entry);
     }
 
     let q_title = query
@@ -117,14 +116,14 @@ pub fn score_entry(query: &SearchQuery, entry: &SongEntry) -> MatchType {
     let title_match = entry
         .track_names
         .iter()
-        .map(|name| compare_name(q_title, Some(name.as_str())))
+        .map(|name| compare_name(q_title, Some(&name.to_lowercase())))
         .max_by_key(|m| *m as u8)
         .unwrap_or(NameMatchType::NoMatch);
 
-    let artist_strs: Vec<&str> = entry
+    let artist_strs: Vec<String> = entry
         .artist_names
         .iter()
-        .map(CompactString::as_str)
+        .map(|name| name.as_str().to_lowercase())
         .collect();
     let q_artists: Vec<&str> = q_artist.into_iter().collect();
     let artist_match =
@@ -133,7 +132,7 @@ pub fn score_entry(query: &SearchQuery, entry: &SongEntry) -> MatchType {
     let album_match = entry
         .album_names
         .iter()
-        .map(|name| compare_name(q_album, Some(name.as_str())))
+        .map(|name| compare_name(q_album, Some(&name.to_lowercase())))
         .max_by_key(|m| *m as u8)
         .unwrap_or(NameMatchType::NoMatch);
 
@@ -169,16 +168,14 @@ pub fn score_entry(query: &SearchQuery, entry: &SongEntry) -> MatchType {
 }
 
 /// 纯全局关键词搜索
-fn score_global_keyword(q_raw: &str, entry: &SongEntry) -> MatchType {
-    let q_lower = convert_tw2s(q_raw).to_lowercase();
-
-    let mut remainder = q_lower.clone();
+fn score_global_keyword(q_norm: &str, entry: &SongEntry) -> MatchType {
+    let mut remainder = q_norm.to_string();
     let mut artist_found = false;
     let mut album_found = false;
 
     // 先删除歌手
     for artist in &entry.artist_names {
-        let db_artist = convert_tw2s(artist.as_str()).to_lowercase();
+        let db_artist = artist.as_str().to_lowercase();
         if !db_artist.is_empty() && remainder.contains(&db_artist) {
             remainder = remainder.replace(&db_artist, "").trim().to_string();
             artist_found = true;
@@ -188,7 +185,7 @@ fn score_global_keyword(q_raw: &str, entry: &SongEntry) -> MatchType {
 
     // 再删除专辑
     for album in &entry.album_names {
-        let db_album = convert_tw2s(album.as_str()).to_lowercase();
+        let db_album = album.as_str().to_lowercase();
         if !db_album.is_empty() && remainder.contains(&db_album) {
             // 防止同名主打歌导致剩余字符串变成空串
             let test_remainder = remainder.replace(&db_album, "").trim().to_string();
@@ -205,7 +202,7 @@ fn score_global_keyword(q_raw: &str, entry: &SongEntry) -> MatchType {
         entry
             .track_names
             .iter()
-            .map(|name| compare_name(Some(&remainder), Some(name.as_str())))
+            .map(|name| compare_name(Some(&remainder), Some(&name.to_lowercase())))
             .max_by_key(|m| *m as u8)
             .unwrap_or(NameMatchType::NoMatch) as u8,
     );
@@ -213,14 +210,14 @@ fn score_global_keyword(q_raw: &str, entry: &SongEntry) -> MatchType {
     let artist_score = if artist_found {
         f64::from(ArtistMatchType::Perfect as u8)
     } else {
-        let artist_strs: Vec<&str> = entry
+        let artist_strs: Vec<String> = entry
             .artist_names
             .iter()
-            .map(CompactString::as_str)
+            .map(|name| name.as_str().to_lowercase())
             .collect();
         f64::from(
-            compare_artists(Some(&[q_lower.as_str()]), Some(&artist_strs))
-                .unwrap_or(ArtistMatchType::NoMatch) as u8,
+            compare_artists(Some(&[q_norm]), Some(&artist_strs)).unwrap_or(ArtistMatchType::NoMatch)
+                as u8,
         )
     };
 
@@ -231,7 +228,7 @@ fn score_global_keyword(q_raw: &str, entry: &SongEntry) -> MatchType {
             entry
                 .album_names
                 .iter()
-                .map(|name| compare_name(Some(&q_lower), Some(name.as_str())))
+                .map(|name| compare_name(Some(q_norm), Some(&name.to_lowercase())))
                 .max_by_key(|m| *m as u8)
                 .unwrap_or(NameMatchType::NoMatch) as u8,
         )
@@ -287,19 +284,16 @@ fn check_dash_paren_equivalence(s_dash: &str, s_paren: &str) -> bool {
 }
 
 fn compare_name(name1_opt: Option<&str>, name2_opt: Option<&str>) -> NameMatchType {
-    let (Some(name1_raw), Some(name2_raw)) = (name1_opt, name2_opt) else {
+    let (Some(name1_norm), Some(name2_norm)) = (name1_opt, name2_opt) else {
         return NameMatchType::NoMatch;
     };
 
-    let name1_sc_lower = convert_tw2s(name1_raw).to_lowercase();
-    let name2_sc_lower = convert_tw2s(name2_raw).to_lowercase();
-
-    if name1_sc_lower.trim() == name2_sc_lower.trim() {
+    if name1_norm.trim() == name2_norm.trim() {
         return NameMatchType::Perfect;
     }
 
-    let name1 = normalize_name_for_comparison(&name1_sc_lower);
-    let name2 = normalize_name_for_comparison(&name2_sc_lower);
+    let name1 = normalize_name_for_comparison(name1_norm);
+    let name2 = normalize_name_for_comparison(name2_norm);
     if name1.trim() == name2.trim() {
         return NameMatchType::Perfect;
     }
@@ -398,14 +392,14 @@ fn compare_artists<S1: AsRef<str>, S2: AsRef<str>>(
         return None;
     }
 
-    let list1: Vec<String> = list1_raw
+    let list1: Vec<&str> = list1_raw
         .iter()
-        .map(|s| convert_tw2s(s.as_ref()).to_lowercase())
+        .map(AsRef::as_ref)
         .filter(|s| !s.is_empty())
         .collect();
-    let list2: Vec<String> = list2_raw
+    let list2: Vec<&str> = list2_raw
         .iter()
-        .map(|s| convert_tw2s(s.as_ref()).to_lowercase())
+        .map(AsRef::as_ref)
         .filter(|s| !s.is_empty())
         .collect();
 

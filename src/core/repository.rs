@@ -50,7 +50,7 @@ impl LyricIndexDB {
         result
     }
 
-    /// 用于 /api/get，多字段或模糊搜索，支持字段交集
+    /// 用于 /api/search，多字段或模糊搜索，支持字段交集
     pub fn search_by_fields(&self, query: &SearchQuery) -> Vec<&SongEntry> {
         let prepared = PreparedQuery::from_search_query(query);
 
@@ -59,7 +59,7 @@ impl LyricIndexDB {
             .iter()
             .filter(|entry| rough_match(&prepared, entry))
             .map(|entry| {
-                let score = score_entry(query, entry);
+                let score = score_entry(&prepared, entry);
                 (entry, score)
             })
             .filter(|(_, score)| *score > MatchType::NoMatch)
