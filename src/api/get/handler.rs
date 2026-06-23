@@ -10,7 +10,6 @@ use crate::{
         models::IdQuery,
     },
     services::lyric_service::LyricService,
-    utils::http::json_response,
 };
 
 pub async fn handle_get(
@@ -37,5 +36,5 @@ async fn handle_get_inner(
         .ok_or_else(|| AppError::BadRequest("Only valid query parameters are allowed.".into()))?;
 
     let result = LyricService::get_lyric(&ctx, query).await?;
-    Ok(json_response(&result)?)
+    Ok({ Response::from_json(&result) }?)
 }

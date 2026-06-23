@@ -10,7 +10,6 @@ use crate::{
         models::SearchQuery,
     },
     services::lyric_service::LyricService,
-    utils::http::json_response,
 };
 
 pub async fn handle_search(
@@ -39,5 +38,5 @@ async fn handle_search_inner(
     let max_results = 50;
     let result = LyricService::search_lyric(&ctx, query, max_results).await?;
 
-    Ok(json_response(&result)?)
+    Ok({ Response::from_json(&result) }?)
 }
