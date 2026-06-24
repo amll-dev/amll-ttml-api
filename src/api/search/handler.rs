@@ -31,5 +31,5 @@ async fn handle_search_inner(
     let max_results = 50;
     let result = LyricService::search_lyric(&ctx, query, max_results).await?;
 
-    Ok({ Response::from_json(&result) }?)
+    Ok(Response::from_json(&result)?)
 }

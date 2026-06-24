@@ -2,8 +2,10 @@ use worker::RouteContext;
 
 use crate::{
     api::shared::dto::{
-        ApiResponseEntry,
-        map_song_to_dto,
+        ApiResponse,
+        SearchData,
+        SongItem,
+        map_song_to_item,
     },
     core::{
         error::AppError,
@@ -25,30 +27,34 @@ impl LyricService {
         ctx: &RouteContext<worker::Context>,
         query: SearchQuery,
         limit: usize,
-    ) -> Result<Vec<ApiResponseEntry>, AppError> {
+    ) -> Result<ApiResponse<SearchData>, AppError> {
         let state = acquire_db_read_lock(ctx).await?;
         let matched_songs = state.db.search_by_fields(&query);
         let songs_cloned: Vec<_> = matched_songs.into_iter().take(limit).cloned().collect();
 
         drop(state);
 
-        let results_dto: Vec<ApiResponseEntry> = songs_cloned
+        let items: Vec<SongItem> = songs_cloned
             .iter()
-            .map(|entry| map_song_to_dto(entry, None))
+            .map(|entry| map_song_to_item(entry, None, None))
             .collect();
 
-        Ok(results_dto)
+        Ok(ApiResponse {
+            status: 200,
+            data: SearchData { items },
+        })
     }
 
     pub async fn get_lyric(
         ctx: &RouteContext<worker::Context>,
         query: IdQuery,
-    ) -> Result<Vec<ApiResponseEntry>, AppError> {
+        format: String,
+    ) -> Result<ApiResponse<SongItem>, AppError> {
         let state = acquire_db_read_lock(ctx).await?;
         let matched_indices = state.db.find_by_ids(&query);
 
         if matched_indices.is_empty() {
-            return Ok(vec![]);
+            return Err(AppError::LyricNotFound);
         }
 
         let mut candidates: Vec<_> = matched_indices
@@ -62,8 +68,11 @@ impl LyricService {
 
         let ttml_text = fetch_lyric_ttml(latest_song_cloned.filename.as_str()).await?;
 
-        let api_res = map_song_to_dto(&latest_song_cloned, Some(ttml_text));
+        let item = map_song_to_item(&latest_song_cloned, Some(ttml_text), Some(format));
 
-        Ok(vec![api_res])
+        Ok(ApiResponse {
+            status: 200,
+            data: item,
+        })
     }
 }

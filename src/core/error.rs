@@ -9,6 +9,7 @@ pub enum AppError {
     WorkerError(worker::Error),
     JsonError(serde_json::Error),
     NotFound,
+    LyricNotFound,
     BadRequest(String),
     UpstreamError(String),
 }
@@ -41,6 +42,11 @@ impl AppError {
                 404,
                 "Not Found",
                 "The requested API route does not exist.".into(),
+            ),
+            Self::LyricNotFound => (
+                404,
+                "Not Found",
+                "No lyrics found for the provided query.".into(),
             ),
             Self::BadRequest(msg) => (400, "Bad Request", msg.clone()),
             Self::UpstreamError(msg) => (502, "Bad Gateway", msg.clone()),

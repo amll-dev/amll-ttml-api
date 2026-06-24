@@ -5,10 +5,10 @@ use crate::core::models::SongEntry;
 
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
-pub struct ApiResponseEntry {
+pub struct SongItem {
     pub filename: String,
 
-    pub track_names: Box<[CompactString]>,
+    pub music_names: Box<[CompactString]>,
     pub artist_names: Box<[CompactString]>,
     pub album_names: Box<[CompactString]>,
 
@@ -22,14 +22,31 @@ pub struct ApiResponseEntry {
     pub author_ids: Box<[CompactString]>,
     pub author_usernames: Box<[CompactString]>,
 
-    pub synced_lyrics: Option<String>,
-    pub plain_lyrics: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lyrics: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub format: Option<String>,
 }
 
-pub fn map_song_to_dto(song: &SongEntry, synced_lyrics: Option<String>) -> ApiResponseEntry {
-    ApiResponseEntry {
+#[derive(Serialize)]
+pub struct SearchData {
+    pub items: Vec<SongItem>,
+}
+
+#[derive(Serialize)]
+pub struct ApiResponse<T> {
+    pub status: u16,
+    pub data: T,
+}
+
+pub fn map_song_to_item(
+    song: &SongEntry,
+    lyrics: Option<String>,
+    format: Option<String>,
+) -> SongItem {
+    SongItem {
         filename: song.filename.to_string(),
-        track_names: song.track_names.clone(),
+        music_names: song.track_names.clone(),
         artist_names: song.artist_names.clone(),
         album_names: song.album_names.clone(),
 
@@ -43,7 +60,7 @@ pub fn map_song_to_dto(song: &SongEntry, synced_lyrics: Option<String>) -> ApiRe
         author_ids: song.author_ids.clone(),
         author_usernames: song.author_usernames.clone(),
 
-        synced_lyrics,
-        plain_lyrics: None,
+        lyrics,
+        format,
     }
 }

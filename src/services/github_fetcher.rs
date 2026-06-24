@@ -76,6 +76,8 @@ async fn fetch_and_parse_db() -> Result<LyricIndexDB, AppError> {
     let mut apple_idx: HashMap<CompactString, Vec<usize>> = HashMap::new();
     let mut spotify_idx: HashMap<CompactString, Vec<usize>> = HashMap::new();
     let mut isrc_idx: HashMap<CompactString, Vec<usize>> = HashMap::new();
+    let mut author_id_idx: HashMap<CompactString, Vec<usize>> = HashMap::new();
+    let mut author_username_idx: HashMap<CompactString, Vec<usize>> = HashMap::new();
 
     for line in text.lines() {
         let line = line.trim();
@@ -106,6 +108,12 @@ async fn fetch_and_parse_db() -> Result<LyricIndexDB, AppError> {
             for id in &song.isrcs {
                 isrc_idx.entry(id.clone()).or_default().push(current_index);
             }
+            for id in &song.author_ids {
+                author_id_idx.entry(id.clone()).or_default().push(current_index);
+            }
+            for id in &song.author_usernames {
+                author_username_idx.entry(id.clone()).or_default().push(current_index);
+            }
 
             entries.push(song);
         }
@@ -118,6 +126,8 @@ async fn fetch_and_parse_db() -> Result<LyricIndexDB, AppError> {
         apple_idx,
         spotify_idx,
         isrc_idx,
+        author_id_idx,
+        author_username_idx,
     })
 }
 

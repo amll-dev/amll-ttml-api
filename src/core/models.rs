@@ -95,6 +95,9 @@ pub struct LyricIndexDB {
     pub spotify_idx: HashMap<CompactString, Vec<usize>>,
 
     pub isrc_idx: HashMap<CompactString, Vec<usize>>,
+
+    pub author_id_idx: HashMap<CompactString, Vec<usize>>,
+    pub author_username_idx: HashMap<CompactString, Vec<usize>>,
 }
 
 #[derive(Default)]

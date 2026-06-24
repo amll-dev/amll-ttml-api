@@ -12,53 +12,76 @@ info:
 servers:
   - url: /
 paths:
-  /api/get:
+  /api/v1/lyrics/get:
     get:
       summary: 获取歌词
-      description: 通过唯一的 ID 获取一首歌曲的元数据及其完整的 TTML 歌词。至少需要提供以下任意一个参数。如果提供多个不同平台的参数，或为同一平台提供多个 ID，将使用交集 (AND) 进行匹配。
+      description: |
+        通过唯一的 ID 获取一首歌曲的元数据及其完整的 TTML 歌词。至少需要提供以下任意一个参数。如果提供多个不同平台的参数，或为同一平台提供多个 ID，将使用交集 (AND) 进行匹配。返回匹配结果中最新的一条。
       parameters:
         - name: ncmMusicId
           in: query
           required: false
           schema:
-            type: string
+            type: array
+            items:
+              type: string
           description: 网易云音乐 ID
         - name: qqMusicId
           in: query
           required: false
           schema:
-            type: string
+            type: array
+            items:
+              type: string
           description: QQ 音乐 ID
         - name: appleMusicId
           in: query
           required: false
           schema:
-            type: string
+            type: array
+            items:
+              type: string
           description: Apple Music ID
         - name: spotifyId
           in: query
           required: false
           schema:
-            type: string
+            type: array
+            items:
+              type: string
           description: Spotify ID
         - name: isrc
           in: query
           required: false
           schema:
-            type: string
+            type: array
+            items:
+              type: string
           description: ISRC 编码
+        - name: format
+          in: query
+          required: false
+          schema:
+            type: string
+            default: ttml
+            enum:
+              - ttml
+          description: 保留字段，默认为 ttml。当前仅支持 ttml。
       responses:
         "200":
-          description: 成功（返回长度为 0 或 1 的数组）
+          description: 成功返回歌曲元数据和歌词
           content:
             application/json:
               schema:
-                type: array
-                maxItems: 1
-                items:
-                  $ref: "#/components/schemas/SongMetadata"
+                $ref: "#/components/schemas/GetResponse"
         "400":
-          description: 参数验证失败（未传入任何有效请求参数）
+          description: 参数验证失败（未传入任何有效 ID 参数、不支持的 format 值等）
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: 未匹配到任何歌词
           content:
             application/json:
               schema:
@@ -70,17 +93,11 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
-  /api/search:
+  /api/v1/lyrics/search:
     get:
       summary: 搜索歌词
       description: |
-        在词库中搜索符合条件的歌词。至少需要提供一个参数。如果提供多个参数，将使用交集 (AND) 匹配。
-
-        **注意事项**：
-        1. 文本字段采用忽略大小写的 ASCII 包含匹配，作者字段采用严格全等匹配。
-        2. 结果按照时间戳降序排序。
-        3. 最多返回前 50 条记录。
-        4. `syncedLyrics` 始终为 `null`。你需要使用 `/api/get` 来获取歌词内容。
+        在词库中搜索符合条件的歌词。为了保证接口性能，搜索结果中不包含完整歌词，只返回基础信息。至少需要提供一个参数。如果同时传入 q 和其他参数，则忽略 q，优先使用其他参数。多个非 q 参数之间为 AND 交集关系。空字符串参数视为未传入。
       parameters:
         # 全局搜索
         - name: q
@@ -126,14 +143,14 @@ paths:
           description: 歌词作者 GitHub 用户名（严格全等）
       responses:
         "200":
-          description: 成功（最多返回前 50 条记录，且 syncedLyrics 始终为 null）
+          description: 成功（最多返回前 50 条记录，无匹配时返回空列表）
           content:
             application/json:
               schema:
                 type: array
                 maxItems: 50
                 items:
-                  $ref: "#/components/schemas/SongMetadata"
+                  $ref: "#/components/schemas/SearchResponse"
         "400":
           description: 参数验证失败（未传入任何有效请求参数）
           content:
@@ -149,11 +166,11 @@ paths:
 
 components:
   schemas:
-    SongMetadata:
+    SongItem:
       type: object
       required:
         - filename
-        - trackNames
+        - musicNames
         - artistNames
         - albumNames
         - ncmMusicIds
@@ -163,14 +180,12 @@ components:
         - isrcs
         - authorIds
         - authorUsernames
-        - syncedLyrics
-        - plainLyrics
       properties:
         filename:
           type: string
           description: 歌词文件名
           example: "1768754400682-250306205-r6IrpmBd.ttml"
-        trackNames:
+        musicNames:
           type: array
           items:
             type: string
@@ -230,16 +245,48 @@ components:
             type: string
           description: TTML 歌词贡献者的 GitHub 用户名列表
           example: ["SteamFinder", "apoint123"]
-        syncedLyrics:
+        lyrics:
           type: string
           nullable: true
-          description: TTML 格式的歌词。在 `/api/search` 中始终为 `null`。
+          description: TTML 格式的歌词内容。仅在 `get` 接口中返回。
           example: "ttml字符串..."
-        plainLyrics:
+        format:
           type: string
           nullable: true
-          description: 纯文本歌词（预留字段，当前为 `null`）
-          example: null
+          description: 保留字段。歌词格式标识。仅在 `get` 接口中返回，当前固定为 ttml。
+          example: "ttml"
+
+    GetResponse:
+      type: object
+      required:
+        - status
+        - data
+      properties:
+        status:
+          type: integer
+          example: 200
+        data:
+          $ref: "#/components/schemas/SongItem"
+
+    SearchResponse:
+      type: object
+      required:
+        - status
+        - data
+      properties:
+        status:
+          type: integer
+          example: 200
+        data:
+          type: object
+          required:
+            - items
+          properties:
+            items:
+              type: array
+              maxItems: 50
+              items:
+                $ref: "#/components/schemas/SongItem"
 
     ErrorResponse:
       type: object
@@ -254,9 +301,9 @@ components:
           example: 400
         error:
           type: string
-          description: 错误简述
+          description: 错误分类
           example: "Bad Request"
         message:
           type: string
           description: 详细的错误原因说明
-          example: "Missing required query parameters."
+          example: "Missing valid search parameters."

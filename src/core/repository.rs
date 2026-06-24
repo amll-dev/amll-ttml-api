@@ -1,4 +1,7 @@
-use std::collections::HashMap;
+use std::collections::{
+    HashMap,
+    HashSet,
+};
 
 use compact_str::CompactString;
 
@@ -50,19 +53,56 @@ impl LyricIndexDB {
         result
     }
 
-    /// 用于 /api/search，多字段或模糊搜索，支持字段交集
+    /// 根据多个字段的组合条件搜索歌曲。
+    ///
+    /// 支持 `q` 全局关键词模糊匹配，`musicName`/`artistName`/`albumName` 模糊包含，
+    /// 以及 `authorId`/`authorUsername` 严格全等匹配。多个参数之间为 AND 交集关系。
+    /// 结果按匹配相关性降序排序，相关性相同时按时间戳降序。
     pub fn search_by_fields(&self, query: &SearchQuery) -> Vec<&SongEntry> {
         let prepared = PreparedQuery::from_search_query(query);
 
-        let mut scored_results: Vec<(&SongEntry, MatchType)> = self
-            .entries
+        // 如果传了歌词作者 ID 和用户名，直接精确匹配再模糊打分
+        let candidates: Vec<usize> =
+            if prepared.author_id.is_some() || prepared.author_username.is_some() {
+                let author_id_set = prepared.author_id.as_ref().and_then(|id| {
+                    self.author_id_idx
+                        .get(id.as_str())
+                        .map(|v| v.iter().copied().collect::<HashSet<usize>>())
+                });
+                let author_username_set = prepared.author_username.as_ref().and_then(|username| {
+                    self.author_username_idx
+                        .get(username.as_str())
+                        .map(|v| v.iter().copied().collect::<HashSet<usize>>())
+                });
+
+                let candidate_set = match (author_id_set, author_username_set) {
+                    (Some(a), Some(b)) => a.intersection(&b).copied().collect(),
+                    (Some(a), None) => a,
+                    (None, Some(b)) => b,
+                    (None, None) => HashSet::new(),
+                };
+
+                candidate_set.into_iter().collect()
+            } else {
+                (0..self.entries.len()).collect()
+            };
+
+        // 模糊打分排序
+        let mut scored_results: Vec<(&SongEntry, MatchType)> = candidates
             .iter()
-            .filter(|entry| rough_match(&prepared, entry))
-            .map(|entry| {
-                let score = score_entry(&prepared, entry);
-                (entry, score)
+            .filter_map(|&idx| {
+                let entry = &self.entries[idx];
+                if rough_match(&prepared, entry) {
+                    let score = score_entry(&prepared, entry);
+                    if score > MatchType::NoMatch {
+                        Some((entry, score))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
             })
-            .filter(|(_, score)| *score > MatchType::NoMatch)
             .collect();
 
         scored_results.sort_unstable_by(|a, b| {

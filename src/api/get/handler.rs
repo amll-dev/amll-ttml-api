@@ -5,7 +5,7 @@ use worker::{
 };
 
 use crate::{
-    api::get::extractor::extract_id_query,
+    api::get::extractor::extract_get_query,
     core::error::AppError,
     services::lyric_service::LyricService,
 };
@@ -26,8 +26,8 @@ async fn handle_get_inner(
 ) -> Result<Response, AppError> {
     let url = req.url()?;
 
-    let query = extract_id_query(&url)?;
+    let get_query = extract_get_query(&url)?;
 
-    let result = LyricService::get_lyric(&ctx, query).await?;
-    Ok({ Response::from_json(&result) }?)
+    let result = LyricService::get_lyric(&ctx, get_query.id_query, get_query.format).await?;
+    Ok(Response::from_json(&result)?)
 }
