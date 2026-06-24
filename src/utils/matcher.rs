@@ -40,7 +40,7 @@ pub enum MatchType {
     Perfect = 7,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum NameMatchType {
     NoMatch = 0,
     Low = 2,
@@ -50,7 +50,7 @@ enum NameMatchType {
     Perfect = 10,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ArtistMatchType {
     NoMatch = 0,
     Low = 2,
@@ -67,14 +67,14 @@ fn compute_text_same(text1: &str, text2: &str) -> f64 {
 
 /// 归一化名称字符串
 fn normalize_name_for_comparison(name: &str) -> String {
-    name.replace('’', "'")
+    let replaced = name
+        .replace('’', "'")
         .replace('，', ",")
         .replace(['（', '【', '['], " (")
         .replace(['）', '】', ']'], ") ")
-        .replace("  ", " ")
-        .replace("acoustic version", "acoustic")
-        .trim()
-        .to_string()
+        .replace("acoustic version", "acoustic");
+
+    replaced.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 const TITLE_WEIGHT: f64 = 1.0;
@@ -494,6 +494,13 @@ impl PreparedQuery {
             author_username: query.author_username.clone(),
         }
     }
+
+    pub const fn has_text_fields(&self) -> bool {
+        self.track_name.is_some()
+            || self.artist_name.is_some()
+            || self.album_name.is_some()
+            || self.global_keyword.is_some()
+    }
 }
 
 pub fn rough_match(prepared: &PreparedQuery, entry: &SongEntry) -> bool {
@@ -586,4 +593,305 @@ pub fn rough_match(prepared: &PreparedQuery, entry: &SongEntry) -> bool {
     }
 
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use compact_str::CompactString;
+
+    use super::*;
+    use crate::core::models::SearchQuery;
+
+    fn make_entry(track_names: &[&str], artist_names: &[&str], album_names: &[&str]) -> SongEntry {
+        SongEntry {
+            filename: CompactString::new("test.ttml"),
+            timestamp: 0,
+            track_names: track_names.iter().map(|s| CompactString::new(*s)).collect(),
+            artist_names: artist_names
+                .iter()
+                .map(|s| CompactString::new(*s))
+                .collect(),
+            album_names: album_names.iter().map(|s| CompactString::new(*s)).collect(),
+            ncm_music_ids: Box::default(),
+            qq_music_ids: Box::default(),
+            apple_music_ids: Box::default(),
+            spotify_ids: Box::default(),
+            isrcs: Box::default(),
+            author_ids: Box::default(),
+            author_usernames: Box::default(),
+        }
+    }
+
+    fn make_full_entry(
+        track_names: &[&str],
+        artist_names: &[&str],
+        album_names: &[&str],
+        author_ids: &[&str],
+        author_usernames: &[&str],
+    ) -> SongEntry {
+        SongEntry {
+            filename: CompactString::new("test.ttml"),
+            timestamp: 0,
+            track_names: track_names.iter().map(|s| CompactString::new(*s)).collect(),
+            artist_names: artist_names
+                .iter()
+                .map(|s| CompactString::new(*s))
+                .collect(),
+            album_names: album_names.iter().map(|s| CompactString::new(*s)).collect(),
+            ncm_music_ids: Box::default(),
+            qq_music_ids: Box::default(),
+            apple_music_ids: Box::default(),
+            spotify_ids: Box::default(),
+            isrcs: Box::default(),
+            author_ids: author_ids.iter().map(|s| CompactString::new(*s)).collect(),
+            author_usernames: author_usernames
+                .iter()
+                .map(|s| CompactString::new(*s))
+                .collect(),
+        }
+    }
+
+    fn prepared_from_query(query: &SearchQuery) -> PreparedQuery {
+        PreparedQuery::from_search_query(query)
+    }
+
+    // --- rough_match tests ---
+
+    #[test]
+    fn rough_match_global_keyword_matches_track() {
+        let query = SearchQuery {
+            global_keyword: Some("ME!".into()),
+            ..Default::default()
+        };
+        let prepared = prepared_from_query(&query);
+        let entry = make_entry(&["ME! (feat. Brendon Urie)"], &["Taylor Swift"], &["Lover"]);
+        assert!(rough_match(&prepared, &entry));
+    }
+
+    #[test]
+    fn rough_match_global_keyword_matches_artist() {
+        let query = SearchQuery {
+            global_keyword: Some("Taylor Swift".into()),
+            ..Default::default()
+        };
+        let prepared = prepared_from_query(&query);
+        let entry = make_entry(&["Love Story"], &["Taylor Swift"], &["Fearless"]);
+        assert!(rough_match(&prepared, &entry));
+    }
+
+    #[test]
+    fn rough_match_global_keyword_no_match() {
+        let query = SearchQuery {
+            global_keyword: Some("NonExistent Artist".into()),
+            ..Default::default()
+        };
+        let prepared = prepared_from_query(&query);
+        let entry = make_entry(&["ME!"], &["Taylor Swift"], &["Lover"]);
+        assert!(!rough_match(&prepared, &entry));
+    }
+
+    #[test]
+    fn rough_match_track_name_contains() {
+        let query = SearchQuery {
+            track_name: Some("Love".into()),
+            ..Default::default()
+        };
+        let prepared = prepared_from_query(&query);
+        let entry = make_entry(&["Love Story"], &["Taylor Swift"], &["Fearless"]);
+        assert!(rough_match(&prepared, &entry));
+    }
+
+    #[test]
+    fn rough_match_track_name_no_match() {
+        let query = SearchQuery {
+            track_name: Some("NonExistent".into()),
+            ..Default::default()
+        };
+        let prepared = prepared_from_query(&query);
+        let entry = make_entry(&["ME!"], &["Taylor Swift"], &["Lover"]);
+        assert!(!rough_match(&prepared, &entry));
+    }
+
+    #[test]
+    fn rough_match_artist_name_and() {
+        let query = SearchQuery {
+            track_name: Some("ME!".into()),
+            artist_name: Some("Taylor".into()),
+            ..Default::default()
+        };
+        let prepared = prepared_from_query(&query);
+        let entry = make_entry(&["ME!"], &["Taylor Swift"], &["Lover"]);
+        assert!(rough_match(&prepared, &entry));
+    }
+
+    #[test]
+    fn rough_match_artist_name_and_fails() {
+        let query = SearchQuery {
+            track_name: Some("ME!".into()),
+            artist_name: Some("Ed Sheeran".into()),
+            ..Default::default()
+        };
+        let prepared = prepared_from_query(&query);
+        let entry = make_entry(&["ME!"], &["Taylor Swift"], &["Lover"]);
+        assert!(!rough_match(&prepared, &entry));
+    }
+
+    #[test]
+    fn rough_match_author_id_exact() {
+        let query = SearchQuery {
+            author_id: Some("108002475".into()),
+            ..Default::default()
+        };
+        let prepared = prepared_from_query(&query);
+        let entry = make_full_entry(
+            &["ME!"],
+            &["Taylor Swift"],
+            &["Lover"],
+            &["108002475"],
+            &["apoint123"],
+        );
+        assert!(rough_match(&prepared, &entry));
+    }
+
+    #[test]
+    fn rough_match_author_id_exact_no_match() {
+        let query = SearchQuery {
+            author_id: Some("999999999".into()),
+            ..Default::default()
+        };
+        let prepared = prepared_from_query(&query);
+        let entry = make_full_entry(
+            &["ME!"],
+            &["Taylor Swift"],
+            &["Lover"],
+            &["108002475"],
+            &["apoint123"],
+        );
+        assert!(!rough_match(&prepared, &entry));
+    }
+
+    #[test]
+    fn rough_match_author_username_exact() {
+        let query = SearchQuery {
+            author_username: Some("apoint123".into()),
+            ..Default::default()
+        };
+        let prepared = prepared_from_query(&query);
+        let entry = make_full_entry(
+            &["ME!"],
+            &["Taylor Swift"],
+            &["Lover"],
+            &["108002475"],
+            &["apoint123"],
+        );
+        assert!(rough_match(&prepared, &entry));
+    }
+
+    // --- score_entry tests ---
+
+    #[test]
+    fn score_perfect_match() {
+        let query = SearchQuery {
+            track_name: Some("ME!".into()),
+            artist_name: Some("Taylor Swift".into()),
+            ..Default::default()
+        };
+        let prepared = prepared_from_query(&query);
+        let entry = make_entry(&["ME!"], &["Taylor Swift"], &["Lover"]);
+        let score = score_entry(&prepared, &entry);
+        assert!(score >= MatchType::VeryHigh);
+    }
+
+    #[test]
+    fn score_global_keyword_with_artist_extraction() {
+        let query = SearchQuery {
+            global_keyword: Some("Taylor Swift ME!".into()),
+            ..Default::default()
+        };
+        let prepared = prepared_from_query(&query);
+        let entry = make_entry(&["ME!"], &["Taylor Swift"], &["Lover"]);
+        let score = score_entry(&prepared, &entry);
+        assert!(score >= MatchType::High);
+    }
+
+    #[test]
+    fn score_no_match() {
+        let query = SearchQuery {
+            track_name: Some("Completely Different Song".into()),
+            ..Default::default()
+        };
+        let prepared = prepared_from_query(&query);
+        let entry = make_entry(&["ME!"], &["Taylor Swift"], &["Lover"]);
+        let score = score_entry(&prepared, &entry);
+        assert_eq!(score, MatchType::NoMatch);
+    }
+
+    // --- convert_tw2s tests ---
+
+    #[test]
+    fn convert_traditional_to_simplified() {
+        // 繁体 "愛" -> 简体 "爱"
+        let result = convert_tw2s("愛");
+        assert_eq!(result, "爱");
+    }
+
+    #[test]
+    fn convert_simplified_unchanged() {
+        let result = convert_tw2s("爱");
+        assert_eq!(result, "爱");
+    }
+
+    // --- normalize_name_for_comparison tests ---
+
+    #[test]
+    fn normalize_curly_quotes() {
+        let result = normalize_name_for_comparison("it\u{2019}s");
+        assert_eq!(result, "it's");
+    }
+
+    #[test]
+    fn normalize_chinese_comma() {
+        let result = normalize_name_for_comparison("A，B");
+        assert_eq!(result, "A,B");
+    }
+
+    #[test]
+    fn normalize_brackets() {
+        let result = normalize_name_for_comparison("Song [Deluxe]");
+        assert_eq!(result, "Song (Deluxe)");
+    }
+
+    #[test]
+    fn normalize_multiple_spaces() {
+        assert_eq!(normalize_name_for_comparison("A   B"), "A B");
+        assert_eq!(normalize_name_for_comparison("A    B"), "A B");
+        assert_eq!(normalize_name_for_comparison("  A  B  "), "A B");
+    }
+
+    // --- compare_name tests ---
+
+    #[test]
+    fn compare_name_perfect_match() {
+        assert_eq!(
+            compare_name(Some("me!"), Some("me!")),
+            NameMatchType::Perfect
+        );
+    }
+
+    #[test]
+    fn compare_name_dash_paren_equivalence() {
+        // "Song - Remix" vs "Song (Remix)"
+        assert_eq!(
+            compare_name(Some("song - remix"), Some("song (remix)")),
+            NameMatchType::VeryHigh
+        );
+    }
+
+    #[test]
+    fn compare_name_no_match() {
+        assert_eq!(
+            compare_name(Some("completely different"), Some("another song")),
+            NameMatchType::NoMatch
+        );
+    }
 }
