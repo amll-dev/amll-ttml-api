@@ -22,6 +22,10 @@ pub fn extract_get_query(url: &Url) -> Result<GetQuery, AppError> {
             continue;
         }
         match k.as_ref() {
+            "filename" => {
+                query.filename = Some(val);
+                has_param = true;
+            }
             "ncmMusicId" => {
                 query.ncm_music_ids.push(val);
                 has_param = true;
@@ -55,6 +59,15 @@ pub fn extract_get_query(url: &Url) -> Result<GetQuery, AppError> {
         )));
     }
 
+    #[allow(clippy::case_sensitive_file_extension_comparisons)]
+    if let Some(ref filename) = query.filename
+        && !filename.ends_with(".ttml")
+    {
+        return Err(AppError::BadRequest(format!(
+            "Invalid filename: '{filename}'. Must end with '.ttml'."
+        )));
+    }
+
     if has_param {
         Ok(GetQuery {
             id_query: query,
@@ -62,7 +75,7 @@ pub fn extract_get_query(url: &Url) -> Result<GetQuery, AppError> {
         })
     } else {
         Err(AppError::BadRequest(
-            "At least one ID parameter is required (ncmMusicId, qqMusicId, appleMusicId, spotifyId, isrc).".into(),
+            "At least one parameter is required (filename, ncmMusicId, qqMusicId, appleMusicId, spotifyId, isrc).".into(),
         ))
     }
 }
@@ -150,5 +163,42 @@ mod tests {
         assert_eq!(result.id_query.apple_music_ids, vec!["c"]);
         assert_eq!(result.id_query.spotify_ids, vec!["d"]);
         assert_eq!(result.id_query.isrcs, vec!["e"]);
+    }
+
+    #[test]
+    fn filename_only() {
+        let result = extract_get_query(&url(
+            "https://example.com/api/v1/lyrics/get?filename=1768754400682-250306205-r6IrpmBd.ttml",
+        ))
+        .unwrap();
+        assert_eq!(
+            result.id_query.filename,
+            Some("1768754400682-250306205-r6IrpmBd.ttml".into())
+        );
+        assert!(result.id_query.ncm_music_ids.is_empty());
+    }
+
+    #[test]
+    fn filename_with_other_ids_ignored() {
+        let result = extract_get_query(&url(
+            "https://example.com/api/v1/lyrics/get?filename=a.ttml&ncmMusicId=111",
+        ))
+        .unwrap();
+        assert_eq!(result.id_query.filename, Some("a.ttml".into()));
+        assert_eq!(result.id_query.ncm_music_ids, vec!["111"]);
+    }
+
+    #[test]
+    fn empty_filename_returns_error() {
+        let result = extract_get_query(&url("https://example.com/api/v1/lyrics/get?filename="));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn invalid_filename_extension_returns_error() {
+        let result = extract_get_query(&url(
+            "https://example.com/api/v1/lyrics/get?filename=1768754400682-250306205-r6IrpmBd.lrc",
+        ));
+        assert!(result.is_err());
     }
 }

@@ -25,6 +25,16 @@ impl LyricIndexDB {
     ///
     /// 必须严格匹配所有传入的 ID。只有某个歌词同时具有传入的所有 ID，才返回
     pub fn find_by_ids(&self, query: &IdQuery) -> Vec<usize> {
+        if let Some(ref filename) = query.filename {
+            return self
+                .entries
+                .iter()
+                .enumerate()
+                .find(|(_, entry)| entry.filename.as_str() == filename.as_str())
+                .map(|(idx, _)| vec![idx])
+                .unwrap_or_default();
+        }
+
         let mut candidates: Option<Vec<usize>> = None;
 
         let mut apply_filter = |ids: &[String], idx_map: &HashMap<CompactString, Vec<usize>>| {
@@ -194,6 +204,92 @@ mod tests {
     }
 
     // --- find_by_ids tests ---
+
+    #[test]
+    fn find_by_filename_exact_match() {
+        let db = build_test_db(vec![
+            make_song(
+                "1768754400682-250306205-r6IrpmBd.ttml",
+                100,
+                &["Song A"],
+                &["Artist X"],
+                &["111"],
+                &[],
+                &[],
+                &[],
+            ),
+            make_song(
+                "1768754400683-250306205-r6IrpmBd.ttml",
+                200,
+                &["Song B"],
+                &["Artist Y"],
+                &["222"],
+                &[],
+                &[],
+                &[],
+            ),
+        ]);
+        let query = IdQuery {
+            filename: Some("1768754400682-250306205-r6IrpmBd.ttml".into()),
+            ..Default::default()
+        };
+        let result = db.find_by_ids(&query);
+        assert_eq!(result, vec![0]);
+    }
+
+    #[test]
+    fn find_by_filename_not_found() {
+        let db = build_test_db(vec![make_song(
+            "1768754400682-250306205-r6IrpmBd.ttml",
+            100,
+            &["Song A"],
+            &["Artist X"],
+            &["111"],
+            &[],
+            &[],
+            &[],
+        )]);
+        let query = IdQuery {
+            filename: Some("nonexistent.ttml".into()),
+            ..Default::default()
+        };
+        let result = db.find_by_ids(&query);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn find_by_filename_ignores_other_ids() {
+        let db = build_test_db(vec![
+            make_song(
+                "a.ttml",
+                100,
+                &["Song A"],
+                &["Artist X"],
+                &["111"],
+                &[],
+                &[],
+                &[],
+            ),
+            make_song(
+                "b.ttml",
+                200,
+                &["Song B"],
+                &["Artist Y"],
+                &["222"],
+                &[],
+                &[],
+                &[],
+            ),
+        ]);
+
+        let query = IdQuery {
+            filename: Some("b.ttml".into()),
+            ncm_music_ids: vec!["111".into()],
+            ..Default::default()
+        };
+        let result = db.find_by_ids(&query);
+        assert_eq!(result, vec![1]);
+    }
 
     #[test]
     fn find_by_single_ncm_id() {

@@ -102,6 +102,8 @@ pub struct LyricIndexDB {
 
 #[derive(Default)]
 pub struct IdQuery {
+    pub filename: Option<String>,
+
     pub ncm_music_ids: Vec<String>,
     pub qq_music_ids: Vec<String>,
     pub apple_music_ids: Vec<String>,
