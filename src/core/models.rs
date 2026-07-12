@@ -3,6 +3,8 @@ use std::collections::HashMap;
 use compact_str::CompactString;
 use serde::Deserialize;
 
+use crate::utils::id::generate_file_id;
+
 #[derive(Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct RawIndexEntry {
@@ -12,6 +14,7 @@ pub struct RawIndexEntry {
 
 #[derive(Clone, Debug)]
 pub struct SongEntry {
+    pub id: u64,
     pub filename: CompactString,
     pub timestamp: u64,
 
@@ -41,7 +44,10 @@ impl From<RawIndexEntry> for SongEntry {
             .and_then(|ts_str| ts_str.parse::<u64>().ok())
             .unwrap_or(0);
 
+        let id = generate_file_id(&raw.raw_lyric_file);
+
         let mut song = Self {
+            id,
             filename: CompactString::new(&raw.raw_lyric_file),
             timestamp,
 
@@ -88,6 +94,7 @@ impl From<RawIndexEntry> for SongEntry {
 
 pub struct LyricIndexDB {
     pub entries: Vec<SongEntry>,
+    pub id_idx: HashMap<u64, usize>,
 
     pub ncm_idx: HashMap<CompactString, Vec<usize>>,
     pub qq_idx: HashMap<CompactString, Vec<usize>>,

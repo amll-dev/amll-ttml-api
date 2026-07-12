@@ -600,10 +600,14 @@ mod tests {
     use compact_str::CompactString;
 
     use super::*;
-    use crate::core::models::SearchQuery;
+    use crate::{
+        core::models::SearchQuery,
+        utils::id::generate_file_id,
+    };
 
     fn make_entry(track_names: &[&str], artist_names: &[&str], album_names: &[&str]) -> SongEntry {
         SongEntry {
+            id: generate_file_id("test.ttml"),
             filename: CompactString::new("test.ttml"),
             timestamp: 0,
             track_names: track_names.iter().map(|s| CompactString::new(*s)).collect(),
@@ -630,6 +634,7 @@ mod tests {
         author_usernames: &[&str],
     ) -> SongEntry {
         SongEntry {
+            id: generate_file_id("test.ttml"),
             filename: CompactString::new("test.ttml"),
             timestamp: 0,
             track_names: track_names.iter().map(|s| CompactString::new(*s)).collect(),

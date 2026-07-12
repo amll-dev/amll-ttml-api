@@ -25,6 +25,13 @@ pub async fn main(req: Request, env: Env, ctx: worker::Context) -> worker::Resul
     router = router.get_async("/api/v1/lyrics/get", api::get::handler::handle_get);
     router = router.get_async("/api/v1/lyrics/search", api::search::handler::handle_search);
 
+    router = router.get_async("/api/v1/lrclib/search", api::lrclib::handler::handle_search);
+    router = router.get_async("/api/v1/lrclib/get", api::lrclib::handler::handle_get);
+    router = router.get_async(
+        "/api/v1/lrclib/get/:id",
+        api::lrclib::handler::handle_get_by_id,
+    );
+
     router = router.or_else_any_method_async("/", |_req, _ctx| async move {
         AppError::NotFound.to_response()
     });

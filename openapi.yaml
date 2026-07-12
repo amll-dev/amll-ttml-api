@@ -173,6 +173,124 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /api/v1/lrclib/search:
+    get:
+      summary: Lrclib 兼容搜索
+      description: |
+        按照 Lrclib 规范在词库中模糊搜索。**搜索列表的返回结果中不包含歌词原文**（`syncedLyrics` 固定为 `null`）。你需要通过返回的 `id` 二次调用 `get` 接口来获取完整歌词。
+      parameters:
+        - name: q
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: track_name
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: artist_name
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: album_name
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: 成功（最多返回 50 条）
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/LrclibSongItem"
+        "400":
+          description: 缺少有效的搜索参数
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/lrclib/get:
+    get:
+      summary: Lrclib 兼容精确匹配
+      description: |
+        模糊匹配一首歌曲，并返回包含 TTML 原文的结果。
+      parameters:
+        - name: track_name
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: artist_name
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: album_name
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: duration
+          in: query
+          required: false
+          schema:
+            type: number
+      responses:
+        "200":
+          description: 成功，返回带有完整 TTML 歌词的数据
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LrclibSongItem"
+        "400":
+          description: 缺失 track_name 或 artist_name
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: 匹配得分过低或未找到
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/lrclib/get/{id}:
+    get:
+      summary: Lrclib 按 ID 提取歌词
+      description: 通过搜索接口返回的 `id` 获取完整歌词。
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        "200":
+          description: 成功返回完整歌词
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LrclibSongItem"
+        "400":
+          description: ID 格式错误
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: ID 未找到
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
 components:
   schemas:
@@ -265,6 +383,57 @@ components:
           nullable: true
           description: 保留字段。歌词格式标识。仅在 `get` 接口中返回，当前固定为 ttml。
           example: "ttml"
+
+    LrclibSongItem:
+      type: object
+      required:
+        - id
+        - trackName
+        - artistName
+        - albumName
+        - duration
+        - instrumental
+      properties:
+        id:
+          type: integer
+          format: int64
+          description: 由文件名生成的 53 位整数 ID
+          example: 1282853164564431
+        name:
+          type: string
+          description: 歌曲名
+          example: "ME!"
+        trackName:
+          type: string
+          description: 歌曲名
+          example: "ME!"
+        artistName:
+          type: string
+          description: 歌手名
+          example: "Taylor Swift"
+        albumName:
+          type: string
+          description: 专辑名
+          example: "Lover"
+        duration:
+          type: number
+          format: float
+          description: 歌曲时长 (固定 0.0)
+          example: 0.0
+        instrumental:
+          type: boolean
+          description: 是否为纯音乐 (固定为 false)
+          example: false
+        plainLyrics:
+          type: string
+          nullable: true
+          description: 纯文本歌词 (固定为 null)
+          example: null
+        syncedLyrics:
+          type: string
+          nullable: true
+          description: 带有时间轴的歌词 (在 search 接口中为 null，在 get 接口中返回原始 TTML 文本)
+          example: "ttml字符串..."
 
     GetResponse:
       type: object

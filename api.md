@@ -227,7 +227,80 @@
 
 ---
 
-## 3. 错误代码说明
+## 3. Lrclib 兼容接口
+
+为了方便支持 [Lrclib 协议](https://lrclib.net/docs) 的使用者直接接入 AMLL 词库，本项目提供了一组兼容接口。
+
+**兼容性说明与特例：**
+1. **时间轴格式**：`syncedLyrics` 不返回 LRC 格式的歌词，而是原始 TTML 歌词，需要额外转换方能使用。例如，你可以使用 [AMLL 官方的歌词解析和生成模块](https://npmx.dev/package/@applemusic-like-lyrics/lyric)
+2. **纯音乐与时长**：因词库不包含时长，兼容接口返回的 `duration` 固定为 `0.0`。此外，`instrumental` 也固定为 `false`。
+
+### 3.1 兼容搜索 (`/api/v1/lrclib/search`)
+
+在词库中模糊搜索。**搜索列表的返回结果中不包含歌词原文**（`syncedLyrics` 固定为 `null`）。你需要通过返回的 `id` 二次调用 `get` 接口来获取完整歌词。
+
+* **路径**: `/api/v1/lrclib/search`
+* **方法**: `GET`
+* **请求参数**:
+  * `q` (选填): 全局模糊搜索关键词。
+  * `track_name` (选填): 限定歌曲名。
+  * `artist_name` (选填): 限定歌手名。
+  * `album_name` (选填): 限定专辑名。
+
+**响应示例 (200 OK):**
+```json
+[
+  {
+    "id": 1282853164564431,
+    "trackName": "ME!",
+    "artistName": "Brendon Urie",
+    "albumName": "Lover",
+    "duration": 0.0,
+    "instrumental": false,
+    "plainLyrics": null,
+    "syncedLyrics": null
+  }
+]
+```
+
+### 3.2 兼容模糊匹配 (`/api/v1/lrclib/get`)
+
+模糊匹配一首歌曲，并返回包含 TTML 原文的结果。
+
+* **路径**: `/api/v1/lrclib/get`
+* **方法**: `GET`
+* **请求参数**:
+  * `track_name` (必填): 歌曲名。
+  * `artist_name` (必填): 歌手名。
+  * `album_name` (选填): 专辑名。
+  * `duration` (选填): 歌曲时长（仅用于兼容，会被服务器忽略）。
+
+### 3.3 按 ID 获取完整歌词 (`/api/v1/lrclib/get/{id}`)
+
+通过搜索接口返回的 `id` 获取完整歌词。
+
+* **路径**: `/api/v1/lrclib/get/{id}`
+* **方法**: `GET`
+* **路径参数**:
+  * `id` (必填): 从 search 接口获取到的 ID。
+
+**响应示例 (对应 3.2 和 3.3 的 200 OK):**
+```json
+{
+  "id": 1282853164564431,
+  "trackName": "ME!",
+  "artistName": "Brendon Urie",
+  "albumName": "Lover",
+  "duration": 0.0,
+  "instrumental": false,
+  "plainLyrics": null,
+  "syncedLyrics": "..."
+}
+```
+
+---
+
+## 4. 错误代码说明
 
 | HTTP 状态码 | 业务场景                                                        | 处理建议                                                            |
 | ----------- | --------------------------------------------------------------- | ------------------------------------------------------------------- |

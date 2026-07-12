@@ -70,6 +70,7 @@ async fn fetch_and_parse_db() -> Result<LyricIndexDB, AppError> {
 
     let text = response.text().await?;
     let mut entries: Vec<SongEntry> = Vec::new();
+    let mut id_idx: HashMap<u64, usize> = HashMap::new();
 
     let mut ncm_idx: HashMap<CompactString, Vec<usize>> = HashMap::new();
     let mut qq_idx: HashMap<CompactString, Vec<usize>> = HashMap::new();
@@ -90,6 +91,8 @@ async fn fetch_and_parse_db() -> Result<LyricIndexDB, AppError> {
 
             let current_index = entries.len();
 
+            id_idx.insert(song.id, current_index);
+
             for id in &song.ncm_music_ids {
                 ncm_idx.entry(id.clone()).or_default().push(current_index);
             }
@@ -109,10 +112,16 @@ async fn fetch_and_parse_db() -> Result<LyricIndexDB, AppError> {
                 isrc_idx.entry(id.clone()).or_default().push(current_index);
             }
             for id in &song.author_ids {
-                author_id_idx.entry(id.clone()).or_default().push(current_index);
+                author_id_idx
+                    .entry(id.clone())
+                    .or_default()
+                    .push(current_index);
             }
             for id in &song.author_usernames {
-                author_username_idx.entry(id.clone()).or_default().push(current_index);
+                author_username_idx
+                    .entry(id.clone())
+                    .or_default()
+                    .push(current_index);
             }
 
             entries.push(song);
@@ -121,6 +130,7 @@ async fn fetch_and_parse_db() -> Result<LyricIndexDB, AppError> {
 
     Ok(LyricIndexDB {
         entries,
+        id_idx,
         ncm_idx,
         qq_idx,
         apple_idx,

@@ -135,7 +135,10 @@ impl LyricIndexDB {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::models::SongEntry;
+    use crate::{
+        core::models::SongEntry,
+        utils::id::generate_file_id,
+    };
 
     #[allow(clippy::too_many_arguments)]
     fn make_song(
@@ -149,6 +152,7 @@ mod tests {
         author_usernames: &[&str],
     ) -> SongEntry {
         SongEntry {
+            id: generate_file_id(filename),
             filename: CompactString::new(filename),
             timestamp,
             track_names: track_names.iter().map(|s| CompactString::new(*s)).collect(),
@@ -171,12 +175,15 @@ mod tests {
     }
 
     fn build_test_db(songs: Vec<SongEntry>) -> LyricIndexDB {
+        let mut id_idx: HashMap<u64, usize> = HashMap::new();
         let mut ncm_idx: HashMap<CompactString, Vec<usize>> = HashMap::new();
         let mut spotify_idx: HashMap<CompactString, Vec<usize>> = HashMap::new();
         let mut author_id_idx: HashMap<CompactString, Vec<usize>> = HashMap::new();
         let mut author_username_idx: HashMap<CompactString, Vec<usize>> = HashMap::new();
 
         for (i, song) in songs.iter().enumerate() {
+            id_idx.insert(song.id, i);
+
             for id in &song.ncm_music_ids {
                 ncm_idx.entry(id.clone()).or_default().push(i);
             }
@@ -193,6 +200,7 @@ mod tests {
 
         LyricIndexDB {
             entries: songs,
+            id_idx,
             ncm_idx,
             qq_idx: HashMap::new(),
             apple_idx: HashMap::new(),
