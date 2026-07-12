@@ -16,12 +16,22 @@ paths:
     get:
       summary: 获取歌词
       description: |
-        通过唯一的 ID 获取一首歌曲的元数据及其完整的 TTML 歌词。至少需要提供以下任意一个参数。如果提供多个不同平台的参数，或为同一平台提供多个 ID，将使用交集 (AND) 进行匹配。返回匹配结果中最新的一条。
+        通过唯一的 ID 获取一首歌曲的元数据及其完整的 TTML 歌词。至少需要提供以下任意一个参数。
 
-        `filename` 为独占参数，传入时将忽略其他所有 ID 参数，直接按文件名精确匹配。
-
-        如果使用其他平台 ID 获取歌词，将会返回指定 ID 最新的歌词，如果你需要获取旧歌词，请使用 `filename` 精确匹配。
+        **参数优先级**：`id` > `filename` > 平台 IDs
+        * `id` 为最高优先级，传入时忽略其他所有参数。
+        * `filename` 为次高优先级，传入时将忽略其他平台 ID 参数，直接按文件名精确匹配。
+        * 如果仅提供多个不同平台的参数，将使用交集 (AND) 进行匹配，并返回匹配结果中最新的一条。
       parameters:
+        - name: id
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int64
+            minimum: 0
+            maximum: 9007199254740991
+          description: 由文件名生成的 53 位整数 ID，精确匹配。最高优先级。
         - name: filename
           in: query
           required: false
@@ -309,6 +319,13 @@ components:
         - authorIds
         - authorUsernames
       properties:
+        id:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 9007199254740991
+          description: 由文件名生成的 53 位整数 ID
+          example: 269710089745311
         filename:
           type: string
           description: 歌词文件名
@@ -397,8 +414,10 @@ components:
         id:
           type: integer
           format: int64
+          minimum: 0
+          maximum: 9007199254740991
           description: 由文件名生成的 53 位整数 ID
-          example: 1282853164564431
+          example: 269710089745311
         name:
           type: string
           description: 歌曲名

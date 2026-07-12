@@ -21,10 +21,24 @@ use crate::{
 };
 
 impl LyricIndexDB {
-    /// 用于 /api/get，严格 AND 交集。
+    /// 用于 `/api/v1/lyrics/get` 接口，根据各种 ID 参数查找歌曲。
     ///
-    /// 必须严格匹配所有传入的 ID。只有某个歌词同时具有传入的所有 ID，才返回
+    /// 匹配优先级：
+    /// 1. `id`：53 位 ID。如果传入了 `id`，将进行 O(1) 查找并直接返回，忽略其他所有参数。
+    /// 2. `filename`：如果传入了 `filename`（且未传入
+    ///    `id`），将精确匹配文件名并直接返回，忽略其他平台 ID。
+    /// 3. 各个平台 ID：如果既未传入 `id` 也未传入 `filename`，则用 AND 交集严格匹配所有传入的平台
+    ///    ID（如 `ncm_music_ids`、`spotify_ids`）。只有某个歌词同时具有传入的所有平台 ID
+    ///    时，才返回。
     pub fn find_by_ids(&self, query: &IdQuery) -> Vec<usize> {
+        if let Some(id) = query.id {
+            return self
+                .id_idx
+                .get(&id)
+                .map(|&idx| vec![idx])
+                .unwrap_or_default();
+        }
+
         if let Some(ref filename) = query.filename {
             return self
                 .entries
@@ -212,6 +226,119 @@ mod tests {
     }
 
     // --- find_by_ids tests ---
+
+    #[test]
+    fn find_by_id_exact_match() {
+        let songs = vec![
+            make_song(
+                "a.ttml",
+                100,
+                &["Song A"],
+                &["Artist X"],
+                &["111"],
+                &[],
+                &[],
+                &[],
+            ),
+            make_song(
+                "b.ttml",
+                200,
+                &["Song B"],
+                &["Artist Y"],
+                &["222"],
+                &[],
+                &[],
+                &[],
+            ),
+        ];
+        let target_id = songs[1].id;
+        let db = build_test_db(songs);
+        let query = IdQuery {
+            id: Some(target_id),
+            ..Default::default()
+        };
+        let result = db.find_by_ids(&query);
+        assert_eq!(result, vec![1]);
+    }
+
+    #[test]
+    fn find_by_id_not_found() {
+        let db = build_test_db(vec![make_song(
+            "a.ttml",
+            100,
+            &["Song A"],
+            &["Artist X"],
+            &["111"],
+            &[],
+            &[],
+            &[],
+        )]);
+        let query = IdQuery {
+            id: Some(999_999),
+            ..Default::default()
+        };
+        let result = db.find_by_ids(&query);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn find_by_id_takes_priority_over_filename() {
+        let songs = vec![
+            make_song(
+                "a.ttml",
+                100,
+                &["Song A"],
+                &["Artist X"],
+                &[],
+                &[],
+                &[],
+                &[],
+            ),
+            make_song(
+                "b.ttml",
+                200,
+                &["Song B"],
+                &["Artist Y"],
+                &[],
+                &[],
+                &[],
+                &[],
+            ),
+        ];
+        let id_of_b = songs[1].id;
+        let db = build_test_db(songs);
+
+        let query = IdQuery {
+            filename: Some("a.ttml".into()),
+            id: Some(id_of_b),
+            ..Default::default()
+        };
+        let result = db.find_by_ids(&query);
+        assert_eq!(result, vec![1]);
+    }
+
+    #[test]
+    fn find_by_id_ignores_platform_ids_if_present_in_struct() {
+        let songs = vec![make_song(
+            "a.ttml",
+            100,
+            &["Song A"],
+            &["Artist X"],
+            &["111"],
+            &[],
+            &[],
+            &[],
+        )];
+        let id = songs[0].id;
+        let db = build_test_db(songs);
+        let query = IdQuery {
+            id: Some(id),
+            ncm_music_ids: vec!["999".into()],
+            ..Default::default()
+        };
+        let result = db.find_by_ids(&query);
+        assert_eq!(result, vec![0]);
+    }
 
     #[test]
     fn find_by_filename_exact_match() {

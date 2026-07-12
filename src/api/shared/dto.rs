@@ -6,6 +6,7 @@ use crate::core::models::SongEntry;
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct SongItem {
+    pub id: u64,
     pub filename: String,
 
     pub music_names: Box<[CompactString]>,
@@ -45,6 +46,7 @@ pub fn map_song_to_item(
     format: Option<String>,
 ) -> SongItem {
     SongItem {
+        id: song.id,
         filename: song.filename.to_string(),
         music_names: song.track_names.clone(),
         artist_names: song.artist_names.clone(),
@@ -62,5 +64,41 @@ pub fn map_song_to_item(
 
         lyrics,
         format,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use compact_str::CompactString;
+
+    use super::*;
+    use crate::utils::id::generate_file_id;
+
+    #[test]
+    fn map_song_to_item_includes_id() {
+        let filename = "1768754400682-250306205-r6IrpmBd.ttml";
+        let song = SongEntry {
+            id: generate_file_id(filename),
+            filename: CompactString::new(filename),
+            timestamp: 1,
+            track_names: vec![CompactString::new("ME!")].into_boxed_slice(),
+            artist_names: Box::default(),
+            album_names: Box::default(),
+            ncm_music_ids: Box::default(),
+            qq_music_ids: Box::default(),
+            apple_music_ids: Box::default(),
+            spotify_ids: Box::default(),
+            isrcs: Box::default(),
+            author_ids: Box::default(),
+            author_usernames: Box::default(),
+        };
+
+        let item = map_song_to_item(&song, None, None);
+        assert_eq!(item.id, song.id);
+        assert_eq!(item.filename, filename);
+
+        let json = serde_json::to_value(&item).unwrap();
+        assert!(json.get("id").unwrap().is_number());
+        assert_eq!(json.get("id").unwrap().as_u64().unwrap(), song.id);
     }
 }

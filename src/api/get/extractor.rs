@@ -22,6 +22,17 @@ pub fn extract_get_query(url: &Url) -> Result<GetQuery, AppError> {
             continue;
         }
         match k.as_ref() {
+            "id" => match val.parse::<u64>() {
+                Ok(parsed_id) if parsed_id <= 0x001F_FFFF_FFFF_FFFF => {
+                    query.id = Some(parsed_id);
+                    has_param = true;
+                }
+                _ => {
+                    return Err(AppError::BadRequest(
+                        "Invalid ID format. Must be an unsigned integer between 0 and 9007199254740991.".into(),
+                    ));
+                }
+            },
             "filename" => {
                 query.filename = Some(val);
                 has_param = true;
@@ -75,7 +86,7 @@ pub fn extract_get_query(url: &Url) -> Result<GetQuery, AppError> {
         })
     } else {
         Err(AppError::BadRequest(
-            "At least one parameter is required (filename, ncmMusicId, qqMusicId, appleMusicId, spotifyId, isrc).".into(),
+            "At least one parameter is required (id, filename, ncmMusicId, qqMusicId, appleMusicId, spotifyId, isrc).".into(),
         ))
     }
 }
@@ -200,5 +211,33 @@ mod tests {
             "https://example.com/api/v1/lyrics/get?filename=1768754400682-250306205-r6IrpmBd.lrc",
         ));
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn valid_id_parsed_correctly() {
+        let result = extract_get_query(&url(
+            "https://example.com/api/v1/lyrics/get?id=269710089745311",
+        ))
+        .unwrap();
+        assert_eq!(result.id_query.id, Some(269_710_089_745_311));
+    }
+
+    #[test]
+    fn invalid_id_format_returns_error() {
+        let result1 = extract_get_query(&url("https://example.com/api/v1/lyrics/get?id=abc"));
+        assert!(result1.is_err());
+
+        let result2 = extract_get_query(&url("https://example.com/api/v1/lyrics/get?id=-123"));
+        assert!(result2.is_err());
+    }
+
+    #[test]
+    fn id_with_other_params() {
+        let result = extract_get_query(&url(
+            "https://example.com/api/v1/lyrics/get?id=12345&ncmMusicId=111",
+        ))
+        .unwrap();
+        assert_eq!(result.id_query.id, Some(12345));
+        assert_eq!(result.id_query.ncm_music_ids, vec!["111"]);
     }
 }
