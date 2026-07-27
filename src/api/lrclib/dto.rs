@@ -62,6 +62,13 @@ mod tests {
             .into_boxed_slice(),
             artist_names: vec![CompactString::new("Taylor Swift")].into_boxed_slice(),
             album_names: Box::default(),
+            normalized_track_names: vec![
+                CompactString::new("primary title"),
+                CompactString::new("secondary title"),
+            ]
+            .into_boxed_slice(),
+            normalized_artist_names: vec![CompactString::new("taylor swift")].into_boxed_slice(),
+            normalized_album_names: Box::default(),
             ncm_music_ids: Box::default(),
             qq_music_ids: Box::default(),
             apple_music_ids: Box::default(),

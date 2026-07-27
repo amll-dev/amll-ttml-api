@@ -151,7 +151,10 @@ mod tests {
     use super::*;
     use crate::{
         core::models::SongEntry,
-        utils::id::generate_file_id,
+        utils::{
+            id::generate_file_id,
+            matcher::normalize_name_for_comparison,
+        },
     };
 
     #[allow(clippy::too_many_arguments)]
@@ -175,6 +178,15 @@ mod tests {
                 .map(|s| CompactString::new(*s))
                 .collect(),
             album_names: Box::default(),
+            normalized_track_names: track_names
+                .iter()
+                .map(|s| CompactString::from(normalize_name_for_comparison(s)))
+                .collect(),
+            normalized_artist_names: artist_names
+                .iter()
+                .map(|s| CompactString::from(normalize_name_for_comparison(s)))
+                .collect(),
+            normalized_album_names: Box::default(),
             ncm_music_ids: ncm_ids.iter().map(|s| CompactString::new(*s)).collect(),
             qq_music_ids: Box::default(),
             apple_music_ids: Box::default(),

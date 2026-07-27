@@ -1,48 +1,39 @@
-use worker::{
-    Env,
-    Method,
-    Request,
-    Response,
-    Router,
-    event,
-};
+pub use core::state::AppState;
 
-use crate::core::error::AppError;
+use axum::{
+    Router,
+    routing::get,
+};
+use tower_http::trace::TraceLayer;
+
+use crate::{
+    core::error::AppError,
+    utils::cors::create_cors_layer,
+};
 
 mod api;
 mod core;
 mod services;
 mod utils;
 
-#[event(fetch)]
-pub async fn main(req: Request, env: Env, ctx: worker::Context) -> worker::Result<Response> {
-    if req.method() == Method::Options {
-        return utils::cors::handle_preflight();
-    }
-
-    let mut router = Router::with_data(ctx);
-
-    router = router.get_async("/api/v1/lyrics/get", api::get::handler::handle_get);
-    router = router.get_async("/api/v1/lyrics/search", api::search::handler::handle_search);
-
-    router = router.get_async("/api/v1/lrclib/search", api::lrclib::handler::handle_search);
-    router = router.get_async("/api/v1/lrclib/get", api::lrclib::handler::handle_get);
-    router = router.get_async(
-        "/api/v1/lrclib/get/:id",
-        api::lrclib::handler::handle_get_by_id,
-    );
-
-    router = router.or_else_any_method_async("/", |_req, _ctx| async move {
-        AppError::NotFound.to_response()
-    });
-
-    router = router.or_else_any_method_async("/*catchall", |_req, _ctx| async move {
-        AppError::NotFound.to_response()
-    });
-
-    let mut res = router.run(req, env).await?;
-
-    utils::cors::add_cors_headers(&mut res)?;
-
-    Ok(res)
+pub fn create_app(state: AppState) -> Router {
+    Router::new()
+        .route("/api/v1/lyrics/get", get(api::get::handler::handle_get))
+        .route(
+            "/api/v1/lyrics/search",
+            get(api::search::handler::handle_search),
+        )
+        .route(
+            "/api/v1/lrclib/search",
+            get(api::lrclib::handler::handle_search),
+        )
+        .route("/api/v1/lrclib/get", get(api::lrclib::handler::handle_get))
+        .route(
+            "/api/v1/lrclib/get/{id}",
+            get(api::lrclib::handler::handle_get_by_id),
+        )
+        .fallback(|| async { AppError::NotFound })
+        .layer(create_cors_layer())
+        .layer(TraceLayer::new_for_http())
+        .with_state(state)
 }

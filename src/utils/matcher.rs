@@ -3,6 +3,7 @@ use std::{
     sync::OnceLock,
 };
 
+use compact_str::CompactString;
 use ferrous_opencc::{
     OpenCC,
     config::BuiltinConfig,
@@ -66,8 +67,9 @@ fn compute_text_same(text1: &str, text2: &str) -> f64 {
 }
 
 /// 归一化名称字符串
-fn normalize_name_for_comparison(name: &str) -> String {
-    let replaced = name
+pub fn normalize_name_for_comparison(name: &str) -> String {
+    let replaced = convert_tw2s(name)
+        .to_lowercase()
         .replace('’', "'")
         .replace('，', ",")
         .replace(['（', '【', '['], " (")
@@ -114,25 +116,25 @@ pub fn score_entry(query: &PreparedQuery, entry: &SongEntry) -> MatchType {
     let q_album = query.album_name.as_deref();
 
     let title_match = entry
-        .track_names
+        .normalized_track_names
         .iter()
-        .map(|name| compare_name(q_title, Some(&name.to_lowercase())))
+        .map(|name| compare_name(q_title, Some(name.as_str())))
         .max_by_key(|m| *m as u8)
         .unwrap_or(NameMatchType::NoMatch);
 
-    let artist_strs: Vec<String> = entry
-        .artist_names
+    let artist_strs: Vec<&str> = entry
+        .normalized_artist_names
         .iter()
-        .map(|name| name.as_str().to_lowercase())
+        .map(CompactString::as_str)
         .collect();
     let q_artists: Vec<&str> = q_artist.into_iter().collect();
     let artist_match =
         compare_artists(Some(&q_artists), Some(&artist_strs)).unwrap_or(ArtistMatchType::NoMatch);
 
     let album_match = entry
-        .album_names
+        .normalized_album_names
         .iter()
-        .map(|name| compare_name(q_album, Some(&name.to_lowercase())))
+        .map(|name| compare_name(q_album, Some(name.as_str())))
         .max_by_key(|m| *m as u8)
         .unwrap_or(NameMatchType::NoMatch);
 
@@ -555,7 +557,7 @@ pub fn rough_match(prepared: &PreparedQuery, entry: &SongEntry) -> bool {
     // 具体字段的过滤为包含和 AND 关系
     if let Some(ref val) = prepared.track_name
         && !entry
-            .track_names
+            .normalized_track_names
             .iter()
             .any(|n| contains_ignore_ascii_case(n.as_str(), val))
     {
@@ -564,7 +566,7 @@ pub fn rough_match(prepared: &PreparedQuery, entry: &SongEntry) -> bool {
 
     if let Some(ref val) = prepared.artist_name
         && !entry
-            .artist_names
+            .normalized_artist_names
             .iter()
             .any(|n| contains_ignore_ascii_case(n.as_str(), val))
     {
@@ -573,7 +575,7 @@ pub fn rough_match(prepared: &PreparedQuery, entry: &SongEntry) -> bool {
 
     if let Some(ref val) = prepared.album_name
         && !entry
-            .album_names
+            .normalized_album_names
             .iter()
             .any(|n| contains_ignore_ascii_case(n.as_str(), val))
     {
@@ -616,6 +618,18 @@ mod tests {
                 .map(|s| CompactString::new(*s))
                 .collect(),
             album_names: album_names.iter().map(|s| CompactString::new(*s)).collect(),
+            normalized_track_names: track_names
+                .iter()
+                .map(|s| CompactString::from(normalize_name_for_comparison(s)))
+                .collect(),
+            normalized_artist_names: artist_names
+                .iter()
+                .map(|s| CompactString::from(normalize_name_for_comparison(s)))
+                .collect(),
+            normalized_album_names: album_names
+                .iter()
+                .map(|s| CompactString::from(normalize_name_for_comparison(s)))
+                .collect(),
             ncm_music_ids: Box::default(),
             qq_music_ids: Box::default(),
             apple_music_ids: Box::default(),
@@ -643,6 +657,18 @@ mod tests {
                 .map(|s| CompactString::new(*s))
                 .collect(),
             album_names: album_names.iter().map(|s| CompactString::new(*s)).collect(),
+            normalized_track_names: track_names
+                .iter()
+                .map(|s| CompactString::from(normalize_name_for_comparison(s)))
+                .collect(),
+            normalized_artist_names: artist_names
+                .iter()
+                .map(|s| CompactString::from(normalize_name_for_comparison(s)))
+                .collect(),
+            normalized_album_names: album_names
+                .iter()
+                .map(|s| CompactString::from(normalize_name_for_comparison(s)))
+                .collect(),
             ncm_music_ids: Box::default(),
             qq_music_ids: Box::default(),
             apple_music_ids: Box::default(),
@@ -857,20 +883,20 @@ mod tests {
     #[test]
     fn normalize_chinese_comma() {
         let result = normalize_name_for_comparison("A，B");
-        assert_eq!(result, "A,B");
+        assert_eq!(result, "a,b");
     }
 
     #[test]
     fn normalize_brackets() {
         let result = normalize_name_for_comparison("Song [Deluxe]");
-        assert_eq!(result, "Song (Deluxe)");
+        assert_eq!(result, "song (deluxe)");
     }
 
     #[test]
     fn normalize_multiple_spaces() {
-        assert_eq!(normalize_name_for_comparison("A   B"), "A B");
-        assert_eq!(normalize_name_for_comparison("A    B"), "A B");
-        assert_eq!(normalize_name_for_comparison("  A  B  "), "A B");
+        assert_eq!(normalize_name_for_comparison("A   B"), "a b");
+        assert_eq!(normalize_name_for_comparison("A    B"), "a b");
+        assert_eq!(normalize_name_for_comparison("  A  B  "), "a b");
     }
 
     // --- compare_name tests ---

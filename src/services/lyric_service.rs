@@ -1,5 +1,3 @@
-use worker::RouteContext;
-
 use crate::{
     api::{
         lrclib::dto::{
@@ -19,10 +17,7 @@ use crate::{
             IdQuery,
             SearchQuery,
         },
-    },
-    services::github_fetcher::{
-        acquire_db_read_lock,
-        fetch_lyric_ttml,
+        state::AppState,
     },
     utils::matcher::{
         MatchType,
@@ -34,34 +29,34 @@ use crate::{
 pub struct LyricService;
 
 impl LyricService {
-    pub async fn search_lyric(
-        ctx: &RouteContext<worker::Context>,
-        query: SearchQuery,
+    pub fn search_lyric(
+        state: &AppState,
+        query: &SearchQuery,
         limit: usize,
-    ) -> Result<ApiResponse<SearchData>, AppError> {
-        let state = acquire_db_read_lock(ctx).await?;
+    ) -> ApiResponse<SearchData> {
+        let db = state.db.load();
 
-        let matched_songs = state.db.search_by_fields(&query);
+        let matched_songs = db.search_by_fields(query);
         let items: Vec<SongItem> = matched_songs
             .into_iter()
             .take(limit)
             .map(|entry| map_song_to_item(entry, None, None))
             .collect();
 
-        drop(state);
-        Ok(ApiResponse {
+        drop(db);
+        ApiResponse {
             status: 200,
             data: SearchData { items },
-        })
+        }
     }
 
     pub async fn get_lyric(
-        ctx: &RouteContext<worker::Context>,
+        state: &AppState,
         query: IdQuery,
         format: String,
     ) -> Result<ApiResponse<SongItem>, AppError> {
-        let state = acquire_db_read_lock(ctx).await?;
-        let matched_indices = state.db.find_by_ids(&query);
+        let db = state.db.load();
+        let matched_indices = db.find_by_ids(&query);
 
         if matched_indices.is_empty() {
             return Err(AppError::LyricNotFound);
@@ -69,14 +64,16 @@ impl LyricService {
 
         let mut candidates: Vec<_> = matched_indices
             .into_iter()
-            .map(|idx| &state.db.entries[idx])
+            .map(|idx| &db.entries[idx])
             .collect();
         candidates.sort_by_key(|b| std::cmp::Reverse(b.timestamp));
 
         let latest_song_cloned = candidates[0].clone();
-        drop(state);
+        drop(db);
 
-        let ttml_text = fetch_lyric_ttml(latest_song_cloned.filename.as_str()).await?;
+        let ttml_text = state
+            .fetch_lyric_ttml(latest_song_cloned.filename.as_str())
+            .await?;
 
         let item = map_song_to_item(&latest_song_cloned, Some(ttml_text), Some(format));
 
@@ -86,32 +83,32 @@ impl LyricService {
         })
     }
 
-    pub async fn lrclib_search(
-        ctx: &RouteContext<worker::Context>,
-        query: SearchQuery,
+    pub fn lrclib_search(
+        state: &AppState,
+        query: &SearchQuery,
         limit: usize,
-    ) -> Result<Vec<LrclibSongItem>, AppError> {
-        let state = acquire_db_read_lock(ctx).await?;
+    ) -> Vec<LrclibSongItem> {
+        let db = state.db.load();
 
-        let matched_songs = state.db.search_by_fields(&query);
+        let matched_songs = db.search_by_fields(query);
         let items: Vec<LrclibSongItem> = matched_songs
             .into_iter()
             .take(limit)
             .map(|entry| map_to_lrclib_item(entry, None))
             .collect();
 
-        drop(state);
-        Ok(items)
+        drop(db);
+        items
     }
 
     pub async fn lrclib_get_by_fields(
-        ctx: &RouteContext<worker::Context>,
+        state: &AppState,
         query: SearchQuery,
     ) -> Result<LrclibSongItem, AppError> {
-        let state = acquire_db_read_lock(ctx).await?;
+        let db = state.db.load();
 
         let prepared = PreparedQuery::from_search_query(&query);
-        let matched_songs = state.db.search_by_fields(&query);
+        let matched_songs = db.search_by_fields(&query);
 
         if matched_songs.is_empty() {
             return Err(AppError::LyricNotFound);
@@ -125,29 +122,25 @@ impl LyricService {
         }
 
         let latest_song_cloned = best_match.clone();
-        drop(state);
+        drop(db);
 
-        let ttml_text = fetch_lyric_ttml(latest_song_cloned.filename.as_str()).await?;
+        let ttml_text = state
+            .fetch_lyric_ttml(latest_song_cloned.filename.as_str())
+            .await?;
         let item = map_to_lrclib_item(&latest_song_cloned, Some(ttml_text));
         Ok(item)
     }
 
-    pub async fn lrclib_get_by_id(
-        ctx: &RouteContext<worker::Context>,
-        id: u64,
-    ) -> Result<LrclibSongItem, AppError> {
-        let state = acquire_db_read_lock(ctx).await?;
+    pub async fn lrclib_get_by_id(state: &AppState, id: u64) -> Result<LrclibSongItem, AppError> {
+        let db = state.db.load();
 
-        let idx = state
-            .db
-            .id_idx
-            .get(&id)
-            .copied()
-            .ok_or(AppError::LyricNotFound)?;
-        let song_cloned = state.db.entries[idx].clone();
-        drop(state);
+        let idx = db.id_idx.get(&id).copied().ok_or(AppError::LyricNotFound)?;
+        let song_cloned = db.entries[idx].clone();
+        drop(db);
 
-        let ttml_text = fetch_lyric_ttml(song_cloned.filename.as_str()).await?;
+        let ttml_text = state
+            .fetch_lyric_ttml(song_cloned.filename.as_str())
+            .await?;
         let item = map_to_lrclib_item(&song_cloned, Some(ttml_text));
         Ok(item)
     }

@@ -1,4 +1,4 @@
-use worker::Url;
+use url::form_urlencoded;
 
 use crate::core::{
     error::AppError,
@@ -10,12 +10,12 @@ pub struct GetQuery {
     pub format: String,
 }
 
-pub fn extract_get_query(url: &Url) -> Result<GetQuery, AppError> {
+pub fn extract_get_query(query_str: &str) -> Result<GetQuery, AppError> {
     let mut query = IdQuery::default();
     let mut has_param = false;
     let mut format = String::from("ttml");
 
-    for (k, v) in url.query_pairs() {
+    for (k, v) in form_urlencoded::parse(query_str.as_bytes()) {
         let val = v.into_owned();
         // 空字符串视为未传入
         if val.trim().is_empty() {
@@ -95,69 +95,52 @@ pub fn extract_get_query(url: &Url) -> Result<GetQuery, AppError> {
 mod tests {
     use super::*;
 
-    fn url(s: &str) -> Url {
-        Url::parse(s).unwrap()
-    }
-
     #[test]
     fn no_params_returns_error() {
-        let result = extract_get_query(&url("https://example.com/api/v1/lyrics/get"));
+        let result = extract_get_query("");
         assert!(result.is_err());
     }
 
     #[test]
     fn empty_id_returns_error() {
-        let result = extract_get_query(&url("https://example.com/api/v1/lyrics/get?spotifyId="));
+        let result = extract_get_query("spotifyId=");
         assert!(result.is_err());
     }
 
     #[test]
     fn format_only_returns_error() {
-        let result = extract_get_query(&url("https://example.com/api/v1/lyrics/get?format=ttml"));
+        let result = extract_get_query("format=ttml");
         assert!(result.is_err());
     }
 
     #[test]
     fn single_spotify_id() {
-        let result = extract_get_query(&url(
-            "https://example.com/api/v1/lyrics/get?spotifyId=abc123",
-        ))
-        .unwrap();
+        let result = extract_get_query("spotifyId=abc123").unwrap();
         assert_eq!(result.id_query.spotify_ids, vec!["abc123"]);
         assert_eq!(result.format, "ttml");
     }
 
     #[test]
     fn default_format_is_ttml() {
-        let result =
-            extract_get_query(&url("https://example.com/api/v1/lyrics/get?ncmMusicId=111"))
-                .unwrap();
+        let result = extract_get_query("ncmMusicId=111").unwrap();
         assert_eq!(result.format, "ttml");
     }
 
     #[test]
     fn unsupported_format_returns_error() {
-        let result = extract_get_query(&url(
-            "https://example.com/api/v1/lyrics/get?spotifyId=abc&format=lrc",
-        ));
+        let result = extract_get_query("spotifyId=abc&format=lrc");
         assert!(result.is_err());
     }
 
     #[test]
     fn multiple_ids_same_type() {
-        let result = extract_get_query(&url(
-            "https://example.com/api/v1/lyrics/get?ncmMusicId=111&ncmMusicId=222",
-        ))
-        .unwrap();
+        let result = extract_get_query("ncmMusicId=111&ncmMusicId=222").unwrap();
         assert_eq!(result.id_query.ncm_music_ids, vec!["111", "222"]);
     }
 
     #[test]
     fn multiple_ids_different_types() {
-        let result = extract_get_query(&url(
-            "https://example.com/api/v1/lyrics/get?ncmMusicId=111&spotifyId=abc&isrc=XYZ",
-        ))
-        .unwrap();
+        let result = extract_get_query("ncmMusicId=111&spotifyId=abc&isrc=XYZ").unwrap();
         assert_eq!(result.id_query.ncm_music_ids, vec!["111"]);
         assert_eq!(result.id_query.spotify_ids, vec!["abc"]);
         assert_eq!(result.id_query.isrcs, vec!["XYZ"]);
@@ -165,10 +148,9 @@ mod tests {
 
     #[test]
     fn all_id_types() {
-        let result = extract_get_query(&url(
-            "https://example.com/api/v1/lyrics/get?ncmMusicId=a&qqMusicId=b&appleMusicId=c&spotifyId=d&isrc=e",
-        ))
-        .unwrap();
+        let result =
+            extract_get_query("ncmMusicId=a&qqMusicId=b&appleMusicId=c&spotifyId=d&isrc=e")
+                .unwrap();
         assert_eq!(result.id_query.ncm_music_ids, vec!["a"]);
         assert_eq!(result.id_query.qq_music_ids, vec!["b"]);
         assert_eq!(result.id_query.apple_music_ids, vec!["c"]);
@@ -178,10 +160,7 @@ mod tests {
 
     #[test]
     fn filename_only() {
-        let result = extract_get_query(&url(
-            "https://example.com/api/v1/lyrics/get?filename=1768754400682-250306205-r6IrpmBd.ttml",
-        ))
-        .unwrap();
+        let result = extract_get_query("filename=1768754400682-250306205-r6IrpmBd.ttml").unwrap();
         assert_eq!(
             result.id_query.filename,
             Some("1768754400682-250306205-r6IrpmBd.ttml".into())
@@ -191,52 +170,41 @@ mod tests {
 
     #[test]
     fn filename_with_other_ids_ignored() {
-        let result = extract_get_query(&url(
-            "https://example.com/api/v1/lyrics/get?filename=a.ttml&ncmMusicId=111",
-        ))
-        .unwrap();
+        let result = extract_get_query("filename=a.ttml&ncmMusicId=111").unwrap();
         assert_eq!(result.id_query.filename, Some("a.ttml".into()));
         assert_eq!(result.id_query.ncm_music_ids, vec!["111"]);
     }
 
     #[test]
     fn empty_filename_returns_error() {
-        let result = extract_get_query(&url("https://example.com/api/v1/lyrics/get?filename="));
+        let result = extract_get_query("filename=");
         assert!(result.is_err());
     }
 
     #[test]
     fn invalid_filename_extension_returns_error() {
-        let result = extract_get_query(&url(
-            "https://example.com/api/v1/lyrics/get?filename=1768754400682-250306205-r6IrpmBd.lrc",
-        ));
+        let result = extract_get_query("filename=1768754400682-250306205-r6IrpmBd.lrc");
         assert!(result.is_err());
     }
 
     #[test]
     fn valid_id_parsed_correctly() {
-        let result = extract_get_query(&url(
-            "https://example.com/api/v1/lyrics/get?id=269710089745311",
-        ))
-        .unwrap();
+        let result = extract_get_query("id=269710089745311").unwrap();
         assert_eq!(result.id_query.id, Some(269_710_089_745_311));
     }
 
     #[test]
     fn invalid_id_format_returns_error() {
-        let result1 = extract_get_query(&url("https://example.com/api/v1/lyrics/get?id=abc"));
+        let result1 = extract_get_query("id=abc");
         assert!(result1.is_err());
 
-        let result2 = extract_get_query(&url("https://example.com/api/v1/lyrics/get?id=-123"));
+        let result2 = extract_get_query("id=-123");
         assert!(result2.is_err());
     }
 
     #[test]
     fn id_with_other_params() {
-        let result = extract_get_query(&url(
-            "https://example.com/api/v1/lyrics/get?id=12345&ncmMusicId=111",
-        ))
-        .unwrap();
+        let result = extract_get_query("id=12345&ncmMusicId=111").unwrap();
         assert_eq!(result.id_query.id, Some(12345));
         assert_eq!(result.id_query.ncm_music_ids, vec!["111"]);
     }

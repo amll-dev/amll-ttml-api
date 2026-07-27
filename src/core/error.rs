@@ -1,12 +1,16 @@
-use serde::Serialize;
-use worker::{
-    Response,
-    Result,
+use axum::{
+    Json,
+    http::StatusCode,
+    response::{
+        IntoResponse,
+        Response,
+    },
 };
+use serde::Serialize;
 
 #[derive(Debug)]
 pub enum AppError {
-    WorkerError(worker::Error),
+    ReqwestError(reqwest::Error),
     JsonError(serde_json::Error),
     NotFound,
     LyricNotFound,
@@ -14,9 +18,9 @@ pub enum AppError {
     UpstreamError(String),
 }
 
-impl From<worker::Error> for AppError {
-    fn from(err: worker::Error) -> Self {
-        Self::WorkerError(err)
+impl From<reqwest::Error> for AppError {
+    fn from(err: reqwest::Error) -> Self {
+        Self::ReqwestError(err)
     }
 }
 
@@ -33,24 +37,9 @@ struct ErrorPayload {
     message: String,
 }
 
-impl AppError {
-    pub fn to_response(&self) -> Result<Response> {
-        let (status, error_str, message) = match self {
-            Self::WorkerError(err) => (500, "Internal Server Error", err.to_string()),
-            Self::JsonError(err) => (500, "Internal Server Error", err.to_string()),
-            Self::NotFound => (
-                404,
-                "Not Found",
-                "The requested API route does not exist.".into(),
-            ),
-            Self::LyricNotFound => (
-                404,
-                "Not Found",
-                "No lyrics found for the provided query.".into(),
-            ),
-            Self::BadRequest(msg) => (400, "Bad Request", msg.clone()),
-            Self::UpstreamError(msg) => (502, "Bad Gateway", msg.clone()),
-        };
+impl IntoResponse for AppError {
+    fn into_response(self) -> Response {
+        let (status, error_str, message) = self.parts();
 
         let payload = ErrorPayload {
             status,
@@ -58,15 +47,18 @@ impl AppError {
             message,
         };
 
-        let res = Response::from_json(&payload)?;
-
-        Ok(res.with_status(status))
+        (
+            StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
+            Json(payload),
+        )
+            .into_response()
     }
+}
 
-    #[cfg(test)]
-    fn parts(&self) -> (u16, &'static str, String) {
+impl AppError {
+    pub fn parts(&self) -> (u16, &'static str, String) {
         match self {
-            Self::WorkerError(err) => (500, "Internal Server Error", err.to_string()),
+            Self::ReqwestError(err) => (500, "Internal Server Error", err.to_string()),
             Self::JsonError(err) => (500, "Internal Server Error", err.to_string()),
             Self::NotFound => (
                 404,

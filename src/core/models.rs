@@ -3,7 +3,10 @@ use std::collections::HashMap;
 use compact_str::CompactString;
 use serde::Deserialize;
 
-use crate::utils::id::generate_file_id;
+use crate::utils::{
+    id::generate_file_id,
+    matcher::normalize_name_for_comparison,
+};
 
 #[derive(Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -21,6 +24,10 @@ pub struct SongEntry {
     pub track_names: Box<[CompactString]>,
     pub artist_names: Box<[CompactString]>,
     pub album_names: Box<[CompactString]>,
+
+    pub normalized_track_names: Box<[CompactString]>,
+    pub normalized_artist_names: Box<[CompactString]>,
+    pub normalized_album_names: Box<[CompactString]>,
 
     pub ncm_music_ids: Box<[CompactString]>,
     pub qq_music_ids: Box<[CompactString]>,
@@ -55,6 +62,10 @@ impl From<RawIndexEntry> for SongEntry {
             artist_names: Box::default(),
             album_names: Box::default(),
 
+            normalized_track_names: Box::default(),
+            normalized_artist_names: Box::default(),
+            normalized_album_names: Box::default(),
+
             ncm_music_ids: Box::default(),
             qq_music_ids: Box::default(),
             apple_music_ids: Box::default(),
@@ -88,10 +99,31 @@ impl From<RawIndexEntry> for SongEntry {
             }
         }
 
+        let norm_tracks: Vec<CompactString> = song
+            .track_names
+            .iter()
+            .map(|s| CompactString::from(normalize_name_for_comparison(s)))
+            .collect();
+        let norm_artists: Vec<CompactString> = song
+            .artist_names
+            .iter()
+            .map(|s| CompactString::from(normalize_name_for_comparison(s)))
+            .collect();
+        let norm_albums: Vec<CompactString> = song
+            .album_names
+            .iter()
+            .map(|s| CompactString::from(normalize_name_for_comparison(s)))
+            .collect();
+
+        song.normalized_track_names = norm_tracks.into_boxed_slice();
+        song.normalized_artist_names = norm_artists.into_boxed_slice();
+        song.normalized_album_names = norm_albums.into_boxed_slice();
+
         song
     }
 }
 
+#[derive(Default)]
 pub struct LyricIndexDB {
     pub entries: Vec<SongEntry>,
     pub id_idx: HashMap<u64, usize>,

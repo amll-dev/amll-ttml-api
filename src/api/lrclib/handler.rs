@@ -1,7 +1,11 @@
-use worker::{
-    Request,
-    Response,
-    RouteContext,
+use axum::{
+    Json,
+    extract::{
+        Path,
+        RawQuery,
+        State,
+    },
+    response::IntoResponse,
 };
 
 use crate::{
@@ -9,78 +13,38 @@ use crate::{
         extract_lrclib_get_query,
         extract_lrclib_search_query,
     },
-    core::error::AppError,
+    core::{
+        error::AppError,
+        state::AppState,
+    },
     services::lyric_service::LyricService,
 };
 
 pub async fn handle_search(
-    req: Request,
-    ctx: RouteContext<worker::Context>,
-) -> Result<Response, worker::Error> {
-    match handle_search_inner(req, ctx).await {
-        Ok(res) => Ok(res),
-        Err(err) => err.to_response(),
-    }
-}
-
-async fn handle_search_inner(
-    req: Request,
-    ctx: RouteContext<worker::Context>,
-) -> Result<Response, AppError> {
-    let url = req.url()?;
-    let query = extract_lrclib_search_query(&url)?;
-
+    State(state): State<AppState>,
+    RawQuery(raw_query): RawQuery,
+) -> Result<impl IntoResponse, AppError> {
+    let query = extract_lrclib_search_query(raw_query.as_deref().unwrap_or(""))?;
     let max_results = 50;
-    let items = LyricService::lrclib_search(&ctx, query, max_results).await?;
+    let items = LyricService::lrclib_search(&state, &query, max_results);
 
-    Ok(Response::from_json(&items)?)
+    Ok(Json(items))
 }
 
 pub async fn handle_get(
-    req: Request,
-    ctx: RouteContext<worker::Context>,
-) -> Result<Response, worker::Error> {
-    match handle_get_inner(req, ctx).await {
-        Ok(res) => Ok(res),
-        Err(err) => err.to_response(),
-    }
-}
+    State(state): State<AppState>,
+    RawQuery(raw_query): RawQuery,
+) -> Result<impl IntoResponse, AppError> {
+    let query = extract_lrclib_get_query(raw_query.as_deref().unwrap_or(""))?;
+    let item = LyricService::lrclib_get_by_fields(&state, query).await?;
 
-async fn handle_get_inner(
-    req: Request,
-    ctx: RouteContext<worker::Context>,
-) -> Result<Response, AppError> {
-    let url = req.url()?;
-    let query = extract_lrclib_get_query(&url)?;
-
-    let item = LyricService::lrclib_get_by_fields(&ctx, query).await?;
-
-    Ok(Response::from_json(&item)?)
+    Ok(Json(item))
 }
 
 pub async fn handle_get_by_id(
-    req: Request,
-    ctx: RouteContext<worker::Context>,
-) -> Result<Response, worker::Error> {
-    match handle_get_by_id_inner(req, ctx).await {
-        Ok(res) => Ok(res),
-        Err(err) => err.to_response(),
-    }
-}
-
-async fn handle_get_by_id_inner(
-    _req: Request,
-    ctx: RouteContext<worker::Context>,
-) -> Result<Response, AppError> {
-    let id_str = ctx
-        .param("id")
-        .ok_or(AppError::BadRequest("Missing ID parameter".into()))?;
-
-    let id = id_str
-        .parse::<u64>()
-        .map_err(|_| AppError::BadRequest("Invalid ID format. Must be an integer.".into()))?;
-
-    let item = LyricService::lrclib_get_by_id(&ctx, id).await?;
-
-    Ok(Response::from_json(&item)?)
+    State(state): State<AppState>,
+    Path(id): Path<u64>,
+) -> Result<impl IntoResponse, AppError> {
+    let item = LyricService::lrclib_get_by_id(&state, id).await?;
+    Ok(Json(item))
 }
