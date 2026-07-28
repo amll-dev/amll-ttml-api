@@ -18,6 +18,8 @@ mod utils;
 
 pub fn create_app(state: AppState) -> Router {
     Router::new()
+        .route("/api/v1/status", get(api::status::handler::handle_status))
+        .route("/api/v1/version", get(api::status::handler::handle_status))
         .route("/api/v1/lyrics/get", get(api::get::handler::handle_get))
         .route(
             "/api/v1/lyrics/search",

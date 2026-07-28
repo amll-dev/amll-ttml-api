@@ -1,0 +1,15 @@
+[Unit]
+Description=AMLL TTML API 服务 (Port %i)
+After=network.target
+
+[Service]
+Type=simple
+Environment=PORT=%i
+ExecStart=/usr/local/bin/amll-ttml-api
+Restart=always
+RestartSec=3
+
+SyslogIdentifier=amll-ttml-api-%i
+
+[Install]
+WantedBy=multi-user.target

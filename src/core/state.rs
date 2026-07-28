@@ -27,6 +27,7 @@ pub struct AppState {
     pub db: Arc<ArcSwap<LyricIndexDB>>,
     pub ttml_cache: Cache<String, String>,
     pub http_client: Client,
+    pub start_time: std::time::Instant,
 }
 
 impl Default for AppState {
@@ -53,7 +54,13 @@ impl AppState {
             db: Arc::new(ArcSwap::from_pointee(LyricIndexDB::default())),
             ttml_cache,
             http_client,
+            start_time: std::time::Instant::now(),
         }
+    }
+
+    #[must_use]
+    pub fn lyric_count(&self) -> usize {
+        self.db.load().entries.len()
     }
 
     pub async fn update_db(&self) -> Result<(), AppError> {

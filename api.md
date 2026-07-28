@@ -306,6 +306,35 @@
 
 ---
 
+## 4. 服务状态与版本信息
+
+### 4.1 获取构建与运行状态 (`/api/v1/status` / `/api/v1/version`)
+
+获取当前 API 服务的运行状态、版本号、Git 提交 Hash、构建时间及运行时长等元数据。
+
+* **路径**: `/api/v1/status` (别名 `/api/v1/version`)
+* **方法**: `GET`
+
+**响应示例 (200 OK):**
+```json
+{
+  "status": "ok",
+  "version": "0.1.0",
+  "build": {
+    "commit": "c765e4f",
+    "commitDate": "2026-07-28 04:35:26 +0800",
+    "buildTime": "1785245209 UTC",
+    "rustcVersion": "rustc 1.99.0-nightly (375b1431b 2026-07-10)"
+  },
+  "runtime": {
+    "uptimeSeconds": 60,
+    "lyricCount": 3130
+  }
+}
+```
+
+---
+
 ## 4. 错误代码说明
 
 | HTTP 状态码 | 业务场景                                                        | 处理建议                                                            |
