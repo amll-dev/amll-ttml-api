@@ -1,3 +1,4 @@
 /target
 .wrangler
 Cargo.lock
+data

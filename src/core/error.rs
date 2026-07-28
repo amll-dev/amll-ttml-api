@@ -15,6 +15,8 @@ pub enum AppError {
     NotFound,
     LyricNotFound,
     BadRequest(String),
+    Unauthorized,
+    InternalServerError(String),
     UpstreamError(String),
 }
 
@@ -71,6 +73,12 @@ impl AppError {
                 "No lyrics found for the provided query.".into(),
             ),
             Self::BadRequest(msg) => (400, "Bad Request", msg.clone()),
+            Self::Unauthorized => (
+                401,
+                "Unauthorized",
+                "Invalid or missing authorization token.".into(),
+            ),
+            Self::InternalServerError(msg) => (500, "Internal Server Error", msg.clone()),
             Self::UpstreamError(msg) => (502, "Bad Gateway", msg.clone()),
         }
     }

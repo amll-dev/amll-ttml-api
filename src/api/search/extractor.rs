@@ -32,6 +32,10 @@ pub fn extract_search_query(query_str: &str) -> Result<SearchQuery, AppError> {
                 query.album_name = Some(val);
                 has_non_q_param = true;
             }
+            "lyricText" => {
+                query.lyric_text = Some(val);
+                has_non_q_param = true;
+            }
             "authorId" => {
                 query.author_id = Some(val);
                 has_non_q_param = true;

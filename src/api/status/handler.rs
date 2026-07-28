@@ -66,7 +66,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_status_endpoint() {
-        let state = AppState::new();
+        let state = AppState::new(None);
         let response = handle_status(State(state)).await.into_response();
 
         assert_eq!(response.status(), axum::http::StatusCode::OK);

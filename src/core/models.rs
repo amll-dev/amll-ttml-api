@@ -8,7 +8,7 @@ use crate::utils::{
     matcher::normalize_name_for_comparison,
 };
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct RawIndexEntry {
     pub raw_lyric_file: String,
@@ -159,6 +159,7 @@ pub struct SearchQuery {
     pub track_name: Option<String>,
     pub artist_name: Option<String>,
     pub album_name: Option<String>,
+    pub lyric_text: Option<String>,
 
     pub author_id: Option<String>,
     pub author_username: Option<String>,

@@ -1,8 +1,14 @@
-pub use core::state::AppState;
+pub use core::{
+    db::setup::init_db,
+    state::AppState,
+};
 
 use axum::{
     Router,
-    routing::get,
+    routing::{
+        get,
+        post,
+    },
 };
 use tower_http::trace::TraceLayer;
 
@@ -33,6 +39,10 @@ pub fn create_app(state: AppState) -> Router {
         .route(
             "/api/v1/lrclib/get/{id}",
             get(api::lrclib::handler::handle_get_by_id),
+        )
+        .route(
+            "/api/v1/webhook/sync",
+            post(api::webhook::handler::handle_webhook_sync),
         )
         .fallback(|| async { AppError::NotFound })
         .layer(create_cors_layer())
