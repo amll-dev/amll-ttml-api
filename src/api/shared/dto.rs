@@ -27,6 +27,16 @@ pub struct SongItem {
     pub lyrics: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub format: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub match_context: Option<MatchContext>,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct MatchContext {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub snippet: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -44,6 +54,7 @@ pub fn map_song_to_item(
     song: &SongEntry,
     lyrics: Option<String>,
     format: Option<String>,
+    match_context: Option<MatchContext>,
 ) -> SongItem {
     SongItem {
         id: song.id,
@@ -64,6 +75,8 @@ pub fn map_song_to_item(
 
         lyrics,
         format,
+
+        match_context,
     }
 }
 
@@ -96,7 +109,7 @@ mod tests {
             author_usernames: Box::default(),
         };
 
-        let item = map_song_to_item(&song, None, None);
+        let item = map_song_to_item(&song, None, None, None);
         assert_eq!(item.id, song.id);
         assert_eq!(item.filename, filename);
 

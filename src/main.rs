@@ -8,6 +8,7 @@ use amll_ttml_api::{
     create_app,
     init_db,
 };
+use anyhow::Result;
 use tokio::net::TcpListener;
 use tracing::{
     error,
@@ -19,7 +20,7 @@ use tracing_subscriber::{
 };
 
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<()> {
     tracing_subscriber::registry()
         .with(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -31,16 +32,12 @@ async fn main() {
     let db_url = env::var("DATABASE_URL")
         .unwrap_or_else(|_| "sqlite://data/amll_lyrics.db?mode=rwc".to_string());
 
-    let db_conn = match init_db(&db_url).await {
-        Ok(conn) => {
-            info!("Initialized SQLite database connection pool at {db_url}");
-            Some(conn)
-        }
-        Err(e) => {
-            error!("Failed to initialize database: {e:?}, falling back to memory mode");
-            None
-        }
-    };
+    let db_conn = init_db(&db_url).await.map_err(|e| {
+        error!("Startup error: Failed to initialize SQLite database at `{db_url}`: {e:?}");
+        e
+    })?;
+
+    info!("Initialized SQLite database connection pool at {db_url}");
 
     let state = AppState::new(db_conn);
 
@@ -73,9 +70,10 @@ async fn main() {
         .unwrap_or(3000);
 
     let addr = format!("0.0.0.0:{port}");
-    let listener = TcpListener::bind(&addr)
-        .await
-        .unwrap_or_else(|e| panic!("Failed to bind to {addr}: {e}"));
+    let listener = TcpListener::bind(&addr).await.map_err(|e| {
+        error!("Startup error: Failed to bind to `{addr}`: {e:?}");
+        e
+    })?;
 
     info!("AMLL TTML API Server listening on http://{addr}");
 
@@ -106,5 +104,10 @@ async fn main() {
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal)
         .await
-        .unwrap_or_else(|e| panic!("Server error: {e}"));
+        .map_err(|e| {
+            error!("Server error: {e:?}");
+            e
+        })?;
+
+    Ok(())
 }

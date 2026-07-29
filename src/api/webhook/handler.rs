@@ -63,14 +63,18 @@ mod tests {
     };
 
     use super::handle_webhook_sync;
-    use crate::core::{
-        error::AppError,
-        state::AppState,
+    use crate::{
+        core::{
+            error::AppError,
+            state::AppState,
+        },
+        init_db,
     };
 
     #[tokio::test]
     async fn test_webhook_sync_auth() {
-        let state = AppState::new(None);
+        let db_conn = init_db("sqlite::memory:").await.unwrap();
+        let state = AppState::new(db_conn);
 
         unsafe {
             env::remove_var("SYNC_SECRET");

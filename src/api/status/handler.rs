@@ -62,11 +62,15 @@ mod tests {
     };
 
     use super::handle_status;
-    use crate::AppState;
+    use crate::{
+        AppState,
+        init_db,
+    };
 
     #[tokio::test]
     async fn test_status_endpoint() {
-        let state = AppState::new(None);
+        let db_conn = init_db("sqlite::memory:").await.unwrap();
+        let state = AppState::new(db_conn);
         let response = handle_status(State(state)).await.into_response();
 
         assert_eq!(response.status(), axum::http::StatusCode::OK);

@@ -22,7 +22,7 @@ pub async fn handle_search(
 ) -> Result<impl IntoResponse, AppError> {
     let query = extract_search_query(raw_query.as_deref().unwrap_or(""))?;
     let max_results = 50;
-    let result = LyricService::search_lyric(&state, &query, max_results);
+    let result = LyricService::search_lyric(&state, &query, max_results).await;
 
     Ok(Json(result))
 }

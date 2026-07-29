@@ -12,22 +12,23 @@
 
 ### 1.1 歌曲元数据与歌词模型
 
-| 字段名            | 类型               | 说明                                                                |
-| ----------------- | ------------------ | ------------------------------------------------------------------- |
-| `id`              | `number`           | 由歌词文件名生成的 53 位整数 ID（0～2^53−1）                        |
-| `filename`        | `string`           | 歌词文件名                                                          |
-| `musicNames`      | `string[]`         | 歌曲名列表                                                          |
-| `artistNames`     | `string[]`         | 歌手名列表                                                          |
-| `albumNames`      | `string[]`         | 专辑名列表                                                          |
-| `ncmMusicIds`     | `string[]`         | 网易云音乐平台 ID 列表                                              |
-| `qqMusicIds`      | `string[]`         | QQ 音乐平台 ID 列表                                                 |
-| `appleMusicIds`   | `string[]`         | Apple Music 平台 ID 列表                                            |
-| `spotifyIds`      | `string[]`         | Spotify 平台 ID 列表                                                |
-| `isrcs`           | `string[]`         | ISRC 国际标准音像制品编码列表                                       |
-| `authorIds`       | `string[]`         | TTML 歌词贡献者的 GitHub ID 列表                                    |
-| `authorUsernames` | `string[]`         | TTML 歌词贡献者的 GitHub 用户名列表                                 |
-| `lyrics`          | `string` \| `null` | TTML 格式的歌词内容。仅在 `get` 接口中返回，`search` 接口中不包含。 |
-| `format`          | `string` \| `null` | 歌词格式标识。仅在获取接口中返回，当前固定为 `ttml`。保留字段。     |
+| 字段名            | 类型               | 说明                                                                                          |
+| ----------------- | ------------------ | --------------------------------------------------------------------------------------------- |
+| `id`              | `number`           | 由歌词文件名生成的 53 位整数 ID（0～2^53−1）                                                  |
+| `filename`        | `string`           | 歌词文件名                                                                                    |
+| `musicNames`      | `string[]`         | 歌曲名列表                                                                                    |
+| `artistNames`     | `string[]`         | 歌手名列表                                                                                    |
+| `albumNames`      | `string[]`         | 专辑名列表                                                                                    |
+| `ncmMusicIds`     | `string[]`         | 网易云音乐平台 ID 列表                                                                        |
+| `qqMusicIds`      | `string[]`         | QQ 音乐平台 ID 列表                                                                           |
+| `appleMusicIds`   | `string[]`         | Apple Music 平台 ID 列表                                                                      |
+| `spotifyIds`      | `string[]`         | Spotify 平台 ID 列表                                                                          |
+| `isrcs`           | `string[]`         | ISRC 国际标准音像制品编码列表                                                                 |
+| `authorIds`       | `string[]`         | TTML 歌词贡献者的 GitHub ID 列表                                                              |
+| `authorUsernames` | `string[]`         | TTML 歌词贡献者的 GitHub 用户名列表                                                           |
+| `lyrics`          | `string` \| `null` | TTML 格式的歌词内容。仅在 `get` 接口中返回，`search` 接口中不包含。                           |
+| `format`          | `string` \| `null` | 歌词格式标识。仅在获取接口中返回，当前固定为 `ttml`。保留字段。                               |
+| `matchContext`    | `object` \| `null` | 歌词检索命中上下文。仅在 `search` 搜索且命中歌词正文时返回，包含 `snippet` 歌词正文高亮片段。 |
 
 ### 1.2 错误响应模型
 
@@ -142,7 +143,7 @@
 
 ### 2.2 搜索歌词
 
-在词库中搜索符合条件的歌词。为了保证接口性能，搜索结果中不包含完整歌词，只返回基础信息。
+在词库中搜索符合条件的歌词。为了保证接口性能，搜索结果中不包含完整歌词，只返回基础信息。若命中了歌词正文全文检索，会在响应的项中附加 `matchContext` 高亮片段。
 
 * **路径**: `/api/v1/lyrics/search`
 * **方法**: `GET`
@@ -157,6 +158,7 @@
 | `musicName`      | `string` | 否   | 模糊包含 | 限定匹配曲名                               |
 | `artistName`     | `string` | 否   | 模糊包含 | 限定匹配歌手名                             |
 | `albumName`      | `string` | 否   | 模糊包含 | 限定匹配专辑名                             |
+| `lyricText`      | `string` | 否   | 全文检索 | 限定匹配歌词正文                           |
 | `authorId`       | `string` | 否   | 严格全等 | TTML 贡献者的 GitHub ID                    |
 | `authorUsername` | `string` | 否   | 严格全等 | TTML 贡献者的 GitHub 用户名                |
 
@@ -221,13 +223,47 @@
           "apoint123",
           "kid1412520",
           "kid141252010"
-        ]
+        ],
+        "matchContext": {
+          "snippet": "I'm the only one of me\n<mark>Baby that's the fun of me</mark>\nEeh-eeh-eeh"
+        }
       },
       {
         // 其他搜索结果...
       }
     ]
   }
+}
+```
+
+---
+
+### 2.3 触发词库同步 Webhook
+
+让 API 从歌词库拉取并更新歌词数据。
+
+* **路径**: `/api/v1/webhook/sync`
+* **方法**: `POST`
+* **请求头**: `Authorization: Bearer <SYNC_SECRET>`
+
+#### 响应示例
+
+**成功 (200 OK)**
+
+```json
+{
+  "status": 200,
+  "message": "Sync triggered"
+}
+```
+
+**未授权 (401 Unauthorized)**
+
+```json
+{
+  "status": 401,
+  "error": "Unauthorized",
+  "message": "Invalid or missing authorization token."
 }
 ```
 
@@ -258,6 +294,7 @@
 [
   {
     "id": 269710089745311,
+    "name": "ME!",
     "trackName": "ME!",
     "artistName": "Brendon Urie",
     "albumName": "Lover",
@@ -294,6 +331,7 @@
 ```json
 {
   "id": 269710089745311,
+  "name": "ME!",
   "trackName": "ME!",
   "artistName": "Brendon Urie",
   "albumName": "Lover",
@@ -335,11 +373,12 @@
 
 ---
 
-## 4. 错误代码说明
+## 5. 错误代码说明
 
 | HTTP 状态码 | 业务场景                                                        | 处理建议                                                            |
 | ----------- | --------------------------------------------------------------- | ------------------------------------------------------------------- |
 | `400`       | 参数验证失败（未传入任何有效请求参数、不支持的 format 值等）    | 请检查客户端构造的 URL query 参数是否正确且包含至少一个有效搜索项。 |
+| `401`       | 鉴权失败（用于 Webhook 接口，请求未携带或携带了错误的令牌）     | 请检查请求头是否包含正确的 `Authorization: Bearer <SYNC_SECRET>`。  |
 | `404`       | 路由不存在，或获取接口未匹配到任何歌词                          | 请检查请求的 API 路径以及传入的 ID 是否正确。                       |
-| `500`       | 内部服务器错误或 JSON 序列化异常                                | 通常为内存或计算异常，需联系接口维护者。                            |
+| `500`       | 内部服务器错误、环境变量未配置或 JSON 序列化异常                | 请检查服务器日志或相关环境变量配置（如 `SYNC_SECRET`）。            |
 | `502`       | 网关错误（未能从 GitHub 获取到 TTML 原文 / 索引数据库更新失败） | 远端数据源不稳定，建议客户端实现重试机制或稍后访问。                |

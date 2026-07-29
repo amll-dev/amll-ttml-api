@@ -20,6 +20,12 @@ use crate::{
     },
 };
 
+#[derive(Debug, Clone)]
+pub struct MetadataHit<'a> {
+    pub entry: &'a SongEntry,
+    pub score: MatchType,
+}
+
 impl LyricIndexDB {
     /// 用于 `/api/v1/lyrics/get` 接口，根据各种 ID 参数查找歌曲。
     ///
@@ -77,12 +83,11 @@ impl LyricIndexDB {
         result
     }
 
-    /// 根据多个字段的组合条件搜索歌曲。
+    /// 根据元数据字段（歌名、歌手、专辑及作者等）进行检索与模糊打分
     ///
-    /// 支持 `q` 全局关键词模糊匹配，`musicName`/`artistName`/`albumName` 模糊包含，
-    /// 以及 `authorId`/`authorUsername` 严格全等匹配。多个参数之间为 AND 交集关系。
-    /// 结果按匹配相关性降序排序，相关性相同时按时间戳降序。
-    pub fn search_by_fields(&self, query: &SearchQuery) -> Vec<&SongEntry> {
+    /// 若查询未包含任何具体元数据的约束（如只使用 `lyricText`
+    /// 进行搜索），将返回所有候选条目并统一赋予 `MatchType::Perfect` 分数
+    pub fn search_by_fields(&self, query: &SearchQuery) -> Vec<MetadataHit<'_>> {
         let prepared = PreparedQuery::from_search_query(query);
 
         // 如果传了歌词作者 ID 和用户名，直接精确匹配再模糊打分
@@ -113,21 +118,26 @@ impl LyricIndexDB {
 
         // 仅 author 过滤无文本字段时，候选集已是精确匹配结果，直接按时间戳降序返回
         if !prepared.has_text_fields() {
-            let mut result: Vec<&SongEntry> =
-                candidates.iter().map(|&idx| &self.entries[idx]).collect();
-            result.sort_unstable_by_key(|b| std::cmp::Reverse(b.timestamp));
+            let mut result: Vec<MetadataHit<'_>> = candidates
+                .iter()
+                .map(|&idx| MetadataHit {
+                    entry: &self.entries[idx],
+                    score: MatchType::Perfect,
+                })
+                .collect();
+            result.sort_unstable_by_key(|h| std::cmp::Reverse(h.entry.timestamp));
             return result;
         }
 
         // 模糊打分排序
-        let mut scored_results: Vec<(&SongEntry, MatchType)> = candidates
+        let mut scored_results: Vec<MetadataHit<'_>> = candidates
             .iter()
             .filter_map(|&idx| {
                 let entry = &self.entries[idx];
                 if rough_match(&prepared, entry) {
                     let score = score_entry(&prepared, entry);
                     if score > MatchType::NoMatch {
-                        Some((entry, score))
+                        Some(MetadataHit { entry, score })
                     } else {
                         None
                     }
@@ -138,11 +148,12 @@ impl LyricIndexDB {
             .collect();
 
         scored_results.sort_unstable_by(|a, b| {
-            b.1.cmp(&a.1)
-                .then_with(|| b.0.timestamp.cmp(&a.0.timestamp))
+            b.score
+                .cmp(&a.score)
+                .then_with(|| b.entry.timestamp.cmp(&a.entry.timestamp))
         });
 
-        scored_results.into_iter().map(|(entry, _)| entry).collect()
+        scored_results
     }
 }
 
@@ -643,7 +654,7 @@ mod tests {
         };
         let result = db.search_by_fields(&query);
         assert_eq!(result.len(), 1);
-        assert_eq!(result[0].filename.as_str(), "a.ttml");
+        assert_eq!(result[0].entry.filename.as_str(), "a.ttml");
     }
 
     #[test]
@@ -676,7 +687,7 @@ mod tests {
         };
         let result = db.search_by_fields(&query);
         assert_eq!(result.len(), 1);
-        assert_eq!(result[0].filename.as_str(), "a.ttml");
+        assert_eq!(result[0].entry.filename.as_str(), "a.ttml");
     }
 
     #[test]
@@ -709,7 +720,7 @@ mod tests {
         };
         let result = db.search_by_fields(&query);
         assert_eq!(result.len(), 1);
-        assert_eq!(result[0].filename.as_str(), "a.ttml");
+        assert_eq!(result[0].entry.filename.as_str(), "a.ttml");
     }
 
     #[test]
@@ -753,7 +764,7 @@ mod tests {
         };
         let result = db.search_by_fields(&query);
         assert_eq!(result.len(), 1);
-        assert_eq!(result[0].filename.as_str(), "a.ttml");
+        assert_eq!(result[0].entry.filename.as_str(), "a.ttml");
     }
 
     #[test]
@@ -786,7 +797,7 @@ mod tests {
         };
         let result = db.search_by_fields(&query);
         assert_eq!(result.len(), 1);
-        assert_eq!(result[0].filename.as_str(), "a.ttml");
+        assert_eq!(result[0].entry.filename.as_str(), "a.ttml");
     }
 
     #[test]
@@ -819,7 +830,7 @@ mod tests {
         };
         let result = db.search_by_fields(&query);
         assert_eq!(result.len(), 1);
-        assert_eq!(result[0].filename.as_str(), "a.ttml");
+        assert_eq!(result[0].entry.filename.as_str(), "a.ttml");
     }
 
     #[test]
@@ -873,7 +884,7 @@ mod tests {
         let result = db.search_by_fields(&query);
         assert_eq!(result.len(), 2);
         // Newer first
-        assert_eq!(result[0].filename.as_str(), "new.ttml");
-        assert_eq!(result[1].filename.as_str(), "old.ttml");
+        assert_eq!(result[0].entry.filename.as_str(), "new.ttml");
+        assert_eq!(result[1].entry.filename.as_str(), "old.ttml");
     }
 }

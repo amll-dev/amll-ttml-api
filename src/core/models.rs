@@ -164,3 +164,17 @@ pub struct SearchQuery {
     pub author_id: Option<String>,
     pub author_username: Option<String>,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LyricMatchField {
+    MainLyric,
+    BackgroundVocal,
+}
+
+#[derive(Debug, Clone)]
+pub struct LyricHit {
+    pub id: u64,
+    pub rank: f64,
+    pub field: LyricMatchField,
+    pub snippet: Option<String>,
+}

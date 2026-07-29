@@ -147,6 +147,13 @@ paths:
           schema:
             type: string
           description: 限定匹配专辑名（模糊包含）
+        # 歌词正文匹配
+        - name: lyricText
+          in: query
+          required: false
+          schema:
+            type: string
+          description: 限定匹配歌词正文
         # 歌词作者 GitHub ID 匹配
         - name: authorId
           in: query
@@ -183,6 +190,58 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/webhook/sync:
+    post:
+      summary: 触发词库更新
+      description: 让 API 从歌词库拉取并更新歌词数据。
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: 同步任务触发成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WebhookSyncResponse"
+        "401":
+          description: 鉴权失败（缺失或令牌无效）
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: 服务器环境变量设置不正确
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/status:
+    get:
+      summary: 获取构建与运行状态
+      description: 获取当前 API 服务的运行状态、版本号、Git 提交 Hash、构建时间及运行时长等元数据。
+      responses:
+        "200":
+          description: 成功返回状态与构建元数据
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusResponse"
+
+  /api/v1/version:
+    get:
+      summary: 获取构建与运行状态 (别名)
+      description: |
+        `/api/v1/status` 的别名。
+      responses:
+        "200":
+          description: 成功返回状态与构建元数据
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusResponse"
+
   /api/v1/lrclib/search:
     get:
       summary: Lrclib 兼容搜索
@@ -303,7 +362,21 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
 
 components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: Secret Token
+
   schemas:
+    MatchContext:
+      type: object
+      properties:
+        snippet:
+          type: string
+          description: 检索命中歌词正文的高亮片段
+          example: "I'm the only one of me\n<mark>Baby that's the fun of me</mark>\nEeh-eeh-eeh"
+
     SongItem:
       type: object
       required:
@@ -400,11 +473,16 @@ components:
           nullable: true
           description: 保留字段。歌词格式标识。仅在 `get` 接口中返回，当前固定为 ttml。
           example: "ttml"
+        matchContext:
+          $ref: "#/components/schemas/MatchContext"
+          nullable: true
+          description: 搜索歌词且命中正文时返回的匹配上下文。
 
     LrclibSongItem:
       type: object
       required:
         - id
+        - name
         - trackName
         - artistName
         - albumName
@@ -485,6 +563,72 @@ components:
               maxItems: 50
               items:
                 $ref: "#/components/schemas/SongItem"
+
+    WebhookSyncResponse:
+      type: object
+      required:
+        - status
+        - message
+      properties:
+        status:
+          type: integer
+          example: 200
+        message:
+          type: string
+          example: "Sync triggered"
+
+    BuildInfo:
+      type: object
+      required:
+        - commit
+        - commitDate
+        - buildTime
+        - rustcVersion
+      properties:
+        commit:
+          type: string
+          example: "c765e4f"
+        commitDate:
+          type: string
+          example: "2026-07-28 04:35:26 +0800"
+        buildTime:
+          type: string
+          example: "1785245209 UTC"
+        rustcVersion:
+          type: string
+          example: "rustc 1.99.0-nightly (375b1431b 2026-07-10)"
+
+    RuntimeStatus:
+      type: object
+      required:
+        - uptimeSeconds
+        - lyricCount
+      properties:
+        uptimeSeconds:
+          type: integer
+          example: 60
+        lyricCount:
+          type: integer
+          example: 3130
+
+    StatusResponse:
+      type: object
+      required:
+        - status
+        - version
+        - build
+        - runtime
+      properties:
+        status:
+          type: string
+          example: "ok"
+        version:
+          type: string
+          example: "0.1.0"
+        build:
+          $ref: "#/components/schemas/BuildInfo"
+        runtime:
+          $ref: "#/components/schemas/RuntimeStatus"
 
     ErrorResponse:
       type: object

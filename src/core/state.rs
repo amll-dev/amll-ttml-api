@@ -8,9 +8,12 @@ use moka::future::Cache;
 use reqwest::Client;
 use sea_orm::{
     ColumnTrait,
+    ConnectionTrait,
+    DatabaseBackend,
     DatabaseConnection,
     EntityTrait,
     QueryFilter,
+    Statement,
 };
 use tracing::{
     error,
@@ -21,7 +24,11 @@ use crate::{
     core::{
         db::entity,
         error::AppError,
-        models::LyricIndexDB,
+        models::{
+            LyricHit,
+            LyricIndexDB,
+            LyricMatchField,
+        },
     },
     services::{
         github_fetcher::{
@@ -30,27 +37,25 @@ use crate::{
         },
         sync_service::SyncService,
     },
+    utils::{
+        highlight::extract_lyric_context,
+        matcher::convert_tw2s,
+    },
 };
 
 #[derive(Clone)]
 pub struct AppState {
     pub db: Arc<ArcSwap<LyricIndexDB>>,
-    pub db_conn: Option<DatabaseConnection>,
+    pub db_conn: DatabaseConnection,
     pub sync_lock: Arc<tokio::sync::Mutex<()>>,
     pub ttml_cache: Cache<String, String>,
     pub http_client: Client,
     pub start_time: std::time::Instant,
 }
 
-impl Default for AppState {
-    fn default() -> Self {
-        Self::new(None)
-    }
-}
-
 impl AppState {
     #[must_use]
-    pub fn new(db_conn: Option<DatabaseConnection>) -> Self {
+    pub fn new(db_conn: DatabaseConnection) -> Self {
         let http_client = Client::builder()
             .user_agent("amll-ttml-api/0.1")
             .timeout(Duration::from_secs(30))
@@ -84,34 +89,18 @@ impl AppState {
         };
 
         info!("Running database sync service...");
-        if let Some(ref db_conn) = self.db_conn {
-            let syncer = SyncService::new(db_conn.clone(), self.http_client.clone());
-            match syncer.sync().await {
-                Ok(res) => {
-                    info!("Sync completed with status: {:?}", res.status);
-                    if let Ok(new_db) = fetch_and_parse_db(&self.http_client).await {
-                        self.db.store(Arc::new(new_db));
-                    }
-                    Ok(())
-                }
-                Err(e) => {
-                    error!("Sync failed: {e:?}");
-                    Err(AppError::UpstreamError(e.to_string()))
-                }
-            }
-        } else {
-            info!("Fetching latest lyric index from GitHub...");
-            match fetch_and_parse_db(&self.http_client).await {
-                Ok(new_db) => {
-                    let count = new_db.entries.len();
+        let syncer = SyncService::new(self.db_conn.clone(), self.http_client.clone());
+        match syncer.sync().await {
+            Ok(res) => {
+                info!("Sync completed with status: {:?}", res.status);
+                if let Ok(new_db) = fetch_and_parse_db(&self.http_client).await {
                     self.db.store(Arc::new(new_db));
-                    info!("Successfully updated lyric index DB with {count} entries");
-                    Ok(())
                 }
-                Err(e) => {
-                    error!("Failed to fetch lyric index: {e:?}");
-                    Err(e)
-                }
+                Ok(())
+            }
+            Err(e) => {
+                error!("Sync failed: {e:?}");
+                Err(AppError::UpstreamError(e.to_string()))
             }
         }
     }
@@ -121,11 +110,10 @@ impl AppState {
             return Ok(cached);
         }
 
-        if let Some(ref db_conn) = self.db_conn
-            && let Ok(Some(row)) = entity::Entity::find()
-                .filter(entity::Column::Filename.eq(filename))
-                .one(db_conn)
-                .await
+        if let Ok(Some(row)) = entity::Entity::find()
+            .filter(entity::Column::Filename.eq(filename))
+            .one(&self.db_conn)
+            .await
             && !row.raw_ttml.is_empty()
         {
             self.ttml_cache
@@ -139,5 +127,82 @@ impl AppState {
             .insert(filename.to_string(), text.clone())
             .await;
         Ok(text)
+    }
+
+    pub async fn search_lyrics_fts(
+        &self,
+        keyword: &str,
+        limit: u64,
+    ) -> Result<Vec<LyricHit>, AppError> {
+        if keyword.trim().is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let normalized = convert_tw2s(keyword).to_lowercase();
+        let safe_keyword = normalized.replace('"', "\"\"");
+        let match_expr = format!("\"{safe_keyword}\"");
+
+        let sql = r"
+            SELECT 
+                rowid AS id, 
+                bm25(lyrics_fts, 0.0, 1.0, 0.25) AS rank, 
+                lyric_text,
+                bg_vocal_text
+            FROM lyrics_fts 
+            WHERE lyrics_fts MATCH $1
+            ORDER BY rank ASC 
+            LIMIT $2;
+        ";
+
+        let stmt = Statement::from_sql_and_values(
+            DatabaseBackend::Sqlite,
+            sql,
+            vec![match_expr.into(), limit.into()],
+        );
+
+        let rows = self
+            .db_conn
+            .query_all_raw(stmt)
+            .await
+            .map_err(|e| AppError::InternalServerError(format!("FTS Query Error: {e}")))?;
+
+        let mut hits = Vec::with_capacity(rows.len());
+        for row in rows {
+            let id: i64 = match row.try_get("", "id") {
+                Ok(id) => id,
+                Err(e) => {
+                    tracing::warn!("Failed to read 'id' column from FTS result: {e}");
+                    continue;
+                }
+            };
+
+            let rank: f64 = match row.try_get("", "rank") {
+                Ok(rank) => rank,
+                Err(e) => {
+                    tracing::warn!("Failed to read 'rank' column from FTS result: {e}");
+                    continue;
+                }
+            };
+
+            let lyric_text: String = row.try_get("", "lyric_text").unwrap_or_default();
+            let bg_vocal_text: String = row.try_get("", "bg_vocal_text").unwrap_or_default();
+
+            let (field, snippet) = extract_lyric_context(&lyric_text, &normalized)
+                .map(|s| (LyricMatchField::MainLyric, Some(s)))
+                .or_else(|| {
+                    extract_lyric_context(&bg_vocal_text, &normalized)
+                        .map(|s| (LyricMatchField::BackgroundVocal, Some(s)))
+                })
+                .unwrap_or((LyricMatchField::MainLyric, None));
+
+            hits.push(LyricHit {
+                id: id.cast_unsigned(),
+                rank,
+                field,
+                snippet,
+            });
+        }
+
+        Ok(hits)
     }
 }
