@@ -173,7 +173,7 @@
 
 **成功 (200 OK)**
 
-```json
+```jsonc
 {
   "status": 200,
   "data": {
@@ -273,13 +273,13 @@
 
 为了方便支持 [Lrclib 协议](https://lrclib.net/docs) 的使用者直接接入 AMLL 词库，本项目提供了一组兼容接口。
 
-**兼容性说明与特例：**
-1. **时间轴格式**：`syncedLyrics` 不返回 LRC 格式的歌词，而是原始 TTML 歌词，需要额外转换方能使用。例如，你可以使用 [AMLL 官方的歌词解析和生成模块](https://npmx.dev/package/@applemusic-like-lyrics/lyric)
-2. **纯音乐与时长**：因词库不包含时长，兼容接口返回的 `duration` 固定为 `0.0`。此外，`instrumental` 也固定为 `false`。
+**特性说明：**
+1. **歌曲时长**：`duration` 此值为歌词中最长的时间戳，并非真正的歌曲时长。
+2. **纯音乐**：`instrumental` 字段固定为 `false`。
 
 ### 3.1 兼容搜索 (`/api/v1/lrclib/search`)
 
-在词库中模糊搜索。**搜索列表的返回结果中不包含歌词原文**（`syncedLyrics` 固定为 `null`）。你需要通过返回的 `id` 二次调用 `get` 接口来获取完整歌词。
+在词库中模糊搜索。响应列表中最多返回前 50 条记录。
 
 * **路径**: `/api/v1/lrclib/search`
 * **方法**: `GET`
@@ -290,7 +290,7 @@
   * `album_name` (选填): 限定专辑名。
 
 **响应示例 (200 OK):**
-```json
+```jsonc
 [
   {
     "id": 269710089745311,
@@ -298,17 +298,20 @@
     "trackName": "ME!",
     "artistName": "Brendon Urie",
     "albumName": "Lover",
-    "duration": 0.0,
+    "duration": 185.8,
     "instrumental": false,
-    "plainLyrics": null,
-    "syncedLyrics": null
+    "plainLyrics": "...I never wanna see you walk away\n(And there's a lot of lame guys out there)\n'Cause one of these things is not like the others...",
+    "syncedLyrics": "...[01:14.66]I never wanna see you walk away\n[01:17.29](And there's a lot of lame guys out there)\n[01:19.26]'Cause one of these things is not like the others..."
+  },
+  {
+    // 其他结果...
   }
 ]
 ```
 
 ### 3.2 兼容模糊匹配 (`/api/v1/lrclib/get`)
 
-模糊匹配一首歌曲，并返回包含 TTML 原文的结果。
+模糊匹配一首歌曲，并返回包含完整 LRC 歌词与纯文本歌词的结果。
 
 * **路径**: `/api/v1/lrclib/get`
 * **方法**: `GET`
@@ -335,11 +338,11 @@
   "trackName": "ME!",
   "artistName": "Brendon Urie",
   "albumName": "Lover",
-  "duration": 0.0,
+  "duration": 185.8,
   "instrumental": false,
-  "plainLyrics": null,
-  "syncedLyrics": "..."
-}
+  "plainLyrics": "...I never wanna see you walk away\n(And there's a lot of lame guys out there)\n'Cause one of these things is not like the others...",
+  "syncedLyrics": "...[01:14.66]I never wanna see you walk away\n[01:17.29](And there's a lot of lame guys out there)\n[01:19.26]'Cause one of these things is not like the others..."
+},
 ```
 
 ---

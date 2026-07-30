@@ -26,7 +26,7 @@ pub async fn handle_search(
 ) -> Result<impl IntoResponse, AppError> {
     let query = extract_lrclib_search_query(raw_query.as_deref().unwrap_or(""))?;
     let max_results = 50;
-    let items = LyricService::lrclib_search(&state, &query, max_results);
+    let items = LyricService::lrclib_search(&state, &query, max_results).await;
 
     Ok(Json(items))
 }

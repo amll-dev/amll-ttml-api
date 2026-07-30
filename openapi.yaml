@@ -246,7 +246,7 @@ paths:
     get:
       summary: Lrclib 兼容搜索
       description: |
-        按照 Lrclib 规范在词库中模糊搜索。**搜索列表的返回结果中不包含歌词原文**（`syncedLyrics` 固定为 `null`）。你需要通过返回的 `id` 二次调用 `get` 接口来获取完整歌词。
+        在词库中模糊搜索。响应列表中最多返回前 50 条记录。
       parameters:
         - name: q
           in: query
@@ -288,7 +288,7 @@ paths:
     get:
       summary: Lrclib 兼容精确匹配
       description: |
-        模糊匹配一首歌曲，并返回包含 TTML 原文的结果。
+        模糊匹配一首歌曲，并返回包含解析后 LRC 歌词与纯文本歌词的结果。
       parameters:
         - name: track_name
           in: query
@@ -515,8 +515,8 @@ components:
         duration:
           type: number
           format: float
-          description: 歌曲时长 (固定 0.0)
-          example: 0.0
+          description: 歌曲时长（单位：秒，由歌词最大结束时间戳计算）
+          example: 185.8
         instrumental:
           type: boolean
           description: 是否为纯音乐 (固定为 false)
@@ -524,13 +524,13 @@ components:
         plainLyrics:
           type: string
           nullable: true
-          description: 纯文本歌词 (固定为 null)
-          example: null
+          description: 纯文本歌词
+          example: "...I never wanna see you walk away\n(And there's a lot of lame guys out there)\n'Cause one of these things is not like the others..."
         syncedLyrics:
           type: string
           nullable: true
-          description: 带有时间轴的歌词 (在 search 接口中为 null，在 get 接口中返回原始 TTML 文本)
-          example: "ttml字符串..."
+          description: LRC 格式歌词
+          example: "...[01:14.66]I never wanna see you walk away\n[01:17.29](And there's a lot of lame guys out there)\n[01:19.26]'Cause one of these things is not like the others..."
 
     GetResponse:
       type: object

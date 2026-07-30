@@ -1,6 +1,9 @@
 use serde::Serialize;
 
-use crate::core::models::SongEntry;
+use crate::{
+    core::models::SongEntry,
+    utils::ttml::TTMLFormatResult,
+};
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -16,12 +19,19 @@ pub struct LrclibSongItem {
     pub synced_lyrics: Option<String>,
 }
 
-pub fn map_to_lrclib_item(entry: &SongEntry, lyrics: Option<String>) -> LrclibSongItem {
+pub fn map_to_lrclib_item(
+    entry: &SongEntry,
+    formatted: Option<&TTMLFormatResult>,
+) -> LrclibSongItem {
     let track_name = entry
         .track_names
         .first()
         .map(ToString::to_string)
         .unwrap_or_default();
+
+    let (plain_lyrics, synced_lyrics, duration) = formatted
+        .map(|f| (f.plain_lyrics.clone(), f.synced_lyrics.clone(), f.duration))
+        .unwrap_or((None, None, 0.0));
 
     LrclibSongItem {
         id: entry.id,
@@ -37,10 +47,10 @@ pub fn map_to_lrclib_item(entry: &SongEntry, lyrics: Option<String>) -> LrclibSo
             .first()
             .map(ToString::to_string)
             .unwrap_or_default(),
-        duration: 0.0,
+        duration,
         instrumental: false,
-        plain_lyrics: None,
-        synced_lyrics: lyrics,
+        plain_lyrics,
+        synced_lyrics,
     }
 }
 
@@ -96,15 +106,5 @@ mod tests {
         assert!(!item.instrumental);
         assert_eq!(item.plain_lyrics, None);
         assert_eq!(item.synced_lyrics, None);
-    }
-
-    #[test]
-    fn test_map_to_lrclib_item_with_lyrics() {
-        let entry = make_test_entry();
-        let ttml = "<p>hello</p>".to_string();
-
-        let item = map_to_lrclib_item(&entry, Some(ttml.clone()));
-
-        assert_eq!(item.synced_lyrics, Some(ttml));
     }
 }

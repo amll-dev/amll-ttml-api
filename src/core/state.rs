@@ -40,6 +40,10 @@ use crate::{
     utils::{
         highlight::extract_lyric_context,
         matcher::convert_tw2s,
+        ttml::{
+            TTMLFormatResult,
+            parse_and_format_ttml,
+        },
     },
 };
 
@@ -49,6 +53,7 @@ pub struct AppState {
     pub db_conn: DatabaseConnection,
     pub sync_lock: Arc<tokio::sync::Mutex<()>>,
     pub ttml_cache: Cache<String, String>,
+    pub formatted_lyric_cache: Cache<String, TTMLFormatResult>,
     pub http_client: Client,
     pub start_time: std::time::Instant,
 }
@@ -67,11 +72,17 @@ impl AppState {
             .time_to_live(Duration::from_hours(168))
             .build();
 
+        let formatted_lyric_cache = Cache::builder()
+            .max_capacity(10_000)
+            .time_to_live(Duration::from_hours(168))
+            .build();
+
         Self {
             db: Arc::new(ArcSwap::from_pointee(LyricIndexDB::default())),
             db_conn,
             sync_lock: Arc::new(tokio::sync::Mutex::new(())),
             ttml_cache,
+            formatted_lyric_cache,
             http_client,
             start_time: std::time::Instant::now(),
         }
@@ -127,6 +138,21 @@ impl AppState {
             .insert(filename.to_string(), text.clone())
             .await;
         Ok(text)
+    }
+
+    pub async fn fetch_parsed_lyric(&self, filename: &str) -> Result<TTMLFormatResult, AppError> {
+        if let Some(cached) = self.formatted_lyric_cache.get(filename).await {
+            return Ok(cached);
+        }
+
+        let ttml = self.fetch_lyric_ttml(filename).await?;
+        let formatted = parse_and_format_ttml(&ttml);
+
+        self.formatted_lyric_cache
+            .insert(filename.to_string(), formatted.clone())
+            .await;
+
+        Ok(formatted)
     }
 
     pub async fn search_lyrics_fts(

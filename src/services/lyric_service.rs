@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 
+use futures::StreamExt;
+
 use crate::{
     api::{
         lrclib::dto::{
@@ -39,6 +41,8 @@ pub struct SearchHit<'a> {
 pub struct LyricService;
 
 impl LyricService {
+    const CONCURRENT_FETCH_LIMIT: usize = 10;
+
     pub async fn search_lyric(
         state: &AppState,
         query: &SearchQuery,
@@ -253,7 +257,7 @@ impl LyricService {
         })
     }
 
-    pub fn lrclib_search(
+    pub async fn lrclib_search(
         state: &AppState,
         query: &SearchQuery,
         limit: usize,
@@ -261,14 +265,31 @@ impl LyricService {
         let db = state.db.load();
 
         let matched_hits = db.search_by_fields(query);
-        let items: Vec<LrclibSongItem> = matched_hits
+        let entries: Vec<_> = matched_hits
             .into_iter()
             .take(limit)
-            .map(|hit| map_to_lrclib_item(hit.entry, None))
+            .map(|hit| hit.entry.clone())
             .collect();
 
         drop(db);
-        items
+
+        futures::stream::iter(entries)
+            .map(|entry| async move {
+                let formatted = match state.fetch_parsed_lyric(entry.filename.as_str()).await {
+                    Ok(f) => Some(f),
+                    Err(e) => {
+                        tracing::warn!(
+                            "Failed to fetch parsed lyric for file '{}' in LRCLIB search: {e:?}",
+                            entry.filename
+                        );
+                        None
+                    }
+                };
+                map_to_lrclib_item(&entry, formatted.as_ref())
+            })
+            .buffered(Self::CONCURRENT_FETCH_LIMIT)
+            .collect()
+            .await
     }
 
     pub async fn lrclib_get_by_fields(
@@ -291,10 +312,10 @@ impl LyricService {
         let latest_song_cloned = best_hit.entry.clone();
         drop(db);
 
-        let ttml_text = state
-            .fetch_lyric_ttml(latest_song_cloned.filename.as_str())
+        let formatted = state
+            .fetch_parsed_lyric(latest_song_cloned.filename.as_str())
             .await?;
-        let item = map_to_lrclib_item(&latest_song_cloned, Some(ttml_text));
+        let item = map_to_lrclib_item(&latest_song_cloned, Some(&formatted));
         Ok(item)
     }
 
@@ -305,10 +326,10 @@ impl LyricService {
         let song_cloned = db.entries[idx].clone();
         drop(db);
 
-        let ttml_text = state
-            .fetch_lyric_ttml(song_cloned.filename.as_str())
+        let formatted = state
+            .fetch_parsed_lyric(song_cloned.filename.as_str())
             .await?;
-        let item = map_to_lrclib_item(&song_cloned, Some(ttml_text));
+        let item = map_to_lrclib_item(&song_cloned, Some(&formatted));
         Ok(item)
     }
 }
