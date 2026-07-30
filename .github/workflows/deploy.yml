@@ -32,9 +32,10 @@ jobs:
           mkdir -p ~/.ssh
           ssh-keyscan -H ${{ secrets.SERVER_HOST }} >> ~/.ssh/known_hosts
 
-      - name: Transfer binary and deploy script to server
+      - name: Transfer binary, systemd service file and deploy script to server
         run: |
           scp target/x86_64-unknown-linux-gnu/release/amll-ttml-api ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}:/tmp/amll-ttml-api-new
+          scp systemd/amll-ttml-api@.service ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}:/tmp/amll-ttml-api@.service
           scp scripts/deploy-remote.sh ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}:/tmp/deploy-remote.sh
 
       - name: Deploy

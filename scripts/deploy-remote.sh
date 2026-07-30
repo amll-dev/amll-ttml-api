@@ -28,6 +28,15 @@ fi
 
 echo "[i] 当前活动端口: ${CURRENT_PORT:-无} -> 目标部署端口: ${TARGET_PORT}"
 
+NEW_SERVICE_FILE="/tmp/amll-ttml-api@.service"
+TARGET_SERVICE_FILE="/etc/systemd/system/amll-ttml-api@.service"
+
+if [ -f "$NEW_SERVICE_FILE" ]; then
+  echo "[i] 更新 Systemd 服务文件 $TARGET_SERVICE_FILE"
+  sudo mv "$NEW_SERVICE_FILE" "$TARGET_SERVICE_FILE"
+  sudo systemctl daemon-reload
+fi
+
 sudo mv "$NEW_BINARY" "$TARGET_BINARY"
 sudo chmod +x "$TARGET_BINARY"
 
