@@ -29,9 +29,9 @@ pub fn map_to_lrclib_item(
         .map(ToString::to_string)
         .unwrap_or_default();
 
-    let (plain_lyrics, synced_lyrics, duration) = formatted
-        .map(|f| (f.plain_lyrics.clone(), f.synced_lyrics.clone(), f.duration))
-        .unwrap_or((None, None, 0.0));
+    let (plain_lyrics, synced_lyrics, duration) = formatted.map_or((None, None, 0.0), |f| {
+        (f.plain_lyrics.clone(), f.synced_lyrics.clone(), f.duration)
+    });
 
     LrclibSongItem {
         id: entry.id,
