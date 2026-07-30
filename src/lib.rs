@@ -10,6 +10,10 @@ use axum::{
         post,
     },
 };
+use sentry_tower::{
+    NewSentryLayer,
+    SentryHttpLayer,
+};
 use tower_http::trace::TraceLayer;
 
 use crate::{
@@ -45,6 +49,8 @@ pub fn create_app(state: AppState) -> Router {
             post(api::webhook::handler::handle_webhook_sync),
         )
         .fallback(|| async { AppError::NotFound })
+        .layer(NewSentryLayer::new_from_top())
+        .layer(SentryHttpLayer::new().enable_transaction())
         .layer(create_cors_layer())
         .layer(TraceLayer::new_for_http())
         .with_state(state)

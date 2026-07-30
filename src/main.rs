@@ -21,12 +21,25 @@ use tracing_subscriber::{
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    let sentry_dsn = env::var("SENTRY_DSN").ok();
+
+    let mut options = sentry::ClientOptions::default();
+    options.release = sentry::release_name!();
+    let _sentry_guard = sentry::init((sentry_dsn, options));
+
+    let sentry_layer = sentry_tracing::layer().event_filter(|md| match *md.level() {
+        tracing::Level::ERROR | tracing::Level::WARN => sentry_tracing::EventFilter::Event,
+        tracing::Level::INFO => sentry_tracing::EventFilter::Breadcrumb,
+        _ => sentry_tracing::EventFilter::Ignore,
+    });
+
     tracing_subscriber::registry()
         .with(
             tracing_subscriber::EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| "amll_ttml_api=info,tower_http=info".into()),
         )
         .with(tracing_subscriber::fmt::layer())
+        .with(sentry_layer)
         .init();
 
     let db_url = env::var("DATABASE_URL")

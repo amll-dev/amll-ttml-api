@@ -32,6 +32,19 @@ tokio = { version = "1.38", features = ["full"] }
 tower-http = { version = "0.7", features = ["cors", "trace"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+sentry = { version = "0.49", default-features = false, features = [
+    "anyhow",
+    "backtrace",
+    "contexts",
+    "panic",
+    "transport",
+    "reqwest",
+    "rustls",
+    "sentry-tower",
+    "tower",
+] }
+sentry-tracing = "0.49"
+sentry-tower = { version = "0.49", features = ["http"] }
 ttml_processor = "0.3.3"
 url = "2.5.8"
 zip = "8.6.0"
