@@ -17,7 +17,4 @@ WORKDIR /app
 
 COPY --from=builder /usr/src/app/target/release/amll-ttml-api /app/amll-ttml-api
 
-ENV PORT=41856
-EXPOSE 41856
-
 CMD ["/app/amll-ttml-api"]
