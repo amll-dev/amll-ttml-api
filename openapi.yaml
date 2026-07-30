@@ -10,9 +10,10 @@ info:
     * **内容类型**: `application/json`
     * **CORS**: 允许跨域 (`Access-Control-Allow-Origin: *`)
 servers:
-  - url: /
+  - url: https://api.amll.dev
+    description: API 根域名
 paths:
-  /api/v1/lyrics/get:
+  /v1/lyrics/get:
     get:
       summary: 获取歌词
       description: |
@@ -113,7 +114,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
-  /api/v1/lyrics/search:
+  /v1/lyrics/search:
     get:
       summary: 搜索歌词
       description: |
@@ -191,7 +192,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
-  /api/v1/webhook/sync:
+  /v1/webhook/sync:
     post:
       summary: 触发词库更新
       description: 让 API 从歌词库拉取并更新歌词数据。
@@ -217,7 +218,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
-  /api/v1/status:
+  /v1/status:
     get:
       summary: 获取构建与运行状态
       description: 获取当前 API 服务的运行状态、版本号、Git 提交 Hash、构建时间及运行时长等元数据。
@@ -229,11 +230,11 @@ paths:
               schema:
                 $ref: "#/components/schemas/StatusResponse"
 
-  /api/v1/version:
+  /v1/version:
     get:
       summary: 获取构建与运行状态 (别名)
       description: |
-        `/api/v1/status` 的别名。
+        `/v1/status` 的别名。
       responses:
         "200":
           description: 成功返回状态与构建元数据
@@ -242,7 +243,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/StatusResponse"
 
-  /api/v1/lrclib/search:
+  /v1/lrclib/search:
     get:
       summary: Lrclib 兼容搜索
       description: |
@@ -284,7 +285,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
-  /api/v1/lrclib/get:
+  /v1/lrclib/get:
     get:
       summary: Lrclib 兼容精确匹配
       description: |
@@ -330,7 +331,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
-  /api/v1/lrclib/get/{id}:
+  /v1/lrclib/get/{id}:
     get:
       summary: Lrclib 按 ID 提取歌词
       description: 通过搜索接口返回的 `id` 获取完整歌词。

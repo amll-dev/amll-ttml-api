@@ -1,7 +1,6 @@
 # AMLL TTML API 接口文档
 
-**基础信息**
-
+* **基础地址**: `https://api.amll.dev`
 * **协议**: HTTP/HTTPS
 * **内容类型**: `application/json`
 * **CORS**: 允许跨域 (`Access-Control-Allow-Origin: *`)
@@ -46,7 +45,7 @@
 
 通过唯一的 ID 获取一首歌曲的元数据及其完整的 TTML 歌词。
 
-* **路径**: `/api/v1/lyrics/get`
+* **路径**: `/v1/lyrics/get`
 * **方法**: `GET`
 
 #### 请求参数
@@ -145,7 +144,7 @@
 
 在词库中搜索符合条件的歌词。为了保证接口性能，搜索结果中不包含完整歌词，只返回基础信息。若命中了歌词正文全文检索，会在响应的项中附加 `matchContext` 高亮片段。
 
-* **路径**: `/api/v1/lyrics/search`
+* **路径**: `/v1/lyrics/search`
 * **方法**: `GET`
 
 #### 请求参数
@@ -242,7 +241,7 @@
 
 让 API 从歌词库拉取并更新歌词数据。
 
-* **路径**: `/api/v1/webhook/sync`
+* **路径**: `/v1/webhook/sync`
 * **方法**: `POST`
 * **请求头**: `Authorization: Bearer <SYNC_SECRET>`
 
@@ -277,19 +276,26 @@
 1. **歌曲时长**：`duration` 此值为歌词中最长的时间戳，并非真正的歌曲时长。
 2. **纯音乐**：`instrumental` 字段固定为 `false`。
 
-### 3.1 兼容搜索 (`/api/v1/lrclib/search`)
+### 3.1 兼容搜索 (`/v1/lrclib/search`)
 
 在词库中模糊搜索。响应列表中最多返回前 50 条记录。
 
-* **路径**: `/api/v1/lrclib/search`
+* **路径**: `/v1/lrclib/search`
 * **方法**: `GET`
-* **请求参数**:
-  * `q` (选填): 全局模糊搜索关键词。
-  * `track_name` (选填): 限定歌曲名。
-  * `artist_name` (选填): 限定歌手名。
-  * `album_name` (选填): 限定专辑名。
 
-**响应示例 (200 OK):**
+#### 请求参数
+
+至少需要提供 `track_name` / `q` / `artist_name` / `album_name` 之一。
+
+| 参数名        | 类型     | 必填 | 说明                                                             |
+| ------------- | -------- | ---- | ---------------------------------------------------------------- |
+| `q`           | `string` | 否   | 全局通用搜索关键词（模糊匹配歌曲名、歌手名、专辑名、歌词内容等） |
+| `track_name`  | `string` | 否   | 歌曲名                                                           |
+| `artist_name` | `string` | 否   | 歌手名                                                           |
+| `album_name`  | `string` | 否   | 专辑名                                                           |
+
+#### 响应示例 (200 OK)
+
 ```jsonc
 [
   {
@@ -309,28 +315,39 @@
 ]
 ```
 
-### 3.2 兼容模糊匹配 (`/api/v1/lrclib/get`)
+### 3.2 兼容模糊匹配 (`/v1/lrclib/get`)
 
 模糊匹配一首歌曲，并返回包含完整 LRC 歌词与纯文本歌词的结果。
 
-* **路径**: `/api/v1/lrclib/get`
+* **路径**: `/v1/lrclib/get`
 * **方法**: `GET`
-* **请求参数**:
-  * `track_name` (必填): 歌曲名。
-  * `artist_name` (必填): 歌手名。
-  * `album_name` (选填): 专辑名。
-  * `duration` (选填): 歌曲时长（仅用于兼容，会被服务器忽略）。
 
-### 3.3 按 ID 获取完整歌词 (`/api/v1/lrclib/get/{id}`)
+#### 请求参数
+
+必须提供 `track_name` 与 `artist_name`。
+
+| 参数名        | 类型     | 必填 | 说明             |
+| ------------- | -------- | ---- | ---------------- |
+| `track_name`  | `string` | 是   | 歌曲名           |
+| `artist_name` | `string` | 是   | 歌手名           |
+| `album_name`  | `string` | 否   | 专辑名           |
+| `duration`    | `number` | 否   | 忽略，仅用于兼容 |
+
+### 3.3 按 ID 获取完整歌词 (`/v1/lrclib/get/{id}`)
 
 通过搜索接口返回的 `id` 获取完整歌词。
 
-* **路径**: `/api/v1/lrclib/get/{id}`
+* **路径**: `/v1/lrclib/get/{id}`
 * **方法**: `GET`
-* **路径参数**:
-  * `id` (必填): 从 search 接口获取到的 ID。
 
-**响应示例 (对应 3.2 和 3.3 的 200 OK):**
+#### 路径参数
+
+| 参数名 | 类型     | 必填 | 说明                      |
+| ------ | -------- | ---- | ------------------------- |
+| `id`   | `number` | 是   | 从 search 接口获取到的 ID |
+
+#### 响应示例 (对应 3.2 和 3.3 的 200 OK)
+
 ```json
 {
   "id": 269710089745311,
@@ -342,18 +359,18 @@
   "instrumental": false,
   "plainLyrics": "...I never wanna see you walk away\n(And there's a lot of lame guys out there)\n'Cause one of these things is not like the others...",
   "syncedLyrics": "...[01:14.66]I never wanna see you walk away\n[01:17.29](And there's a lot of lame guys out there)\n[01:19.26]'Cause one of these things is not like the others..."
-},
+}
 ```
 
 ---
 
 ## 4. 服务状态与版本信息
 
-### 4.1 获取构建与运行状态 (`/api/v1/status` / `/api/v1/version`)
+### 4.1 获取构建与运行状态 (`/v1/status` / `/v1/version`)
 
 获取当前 API 服务的运行状态、版本号、Git 提交 Hash、构建时间及运行时长等元数据。
 
-* **路径**: `/api/v1/status` (别名 `/api/v1/version`)
+* **路径**: `/v1/status` (别名 `/v1/version`)
 * **方法**: `GET`
 
 **响应示例 (200 OK):**
