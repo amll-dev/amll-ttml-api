@@ -13,6 +13,7 @@ arc-swap = "1.7"
 async-lock = "3.4.2"
 axum = "0.8.9"
 compact_str = { version = "0.10.0", features = ["serde"] }
+dotenvy = "0.15.7"
 ferrous-opencc = { version = "0.4.0", default-features = false, features = [
     "t2s-conversion",
 ] }

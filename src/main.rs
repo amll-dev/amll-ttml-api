@@ -21,6 +21,8 @@ use tracing_subscriber::{
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    dotenvy::dotenv().ok();
+
     let sentry_dsn = env::var("SENTRY_DSN").ok();
 
     let mut options = sentry::ClientOptions::default();
