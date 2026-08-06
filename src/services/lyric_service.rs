@@ -1,7 +1,4 @@
-use std::{
-    collections::HashMap,
-    marker::PhantomData,
-};
+use std::marker::PhantomData;
 
 use futures::StreamExt;
 
@@ -29,22 +26,16 @@ use crate::{
         models::{
             IdQuery,
             LyricHit,
-            LyricIndexDB,
-            LyricMatchField,
             SearchQuery,
-            SongEntry,
         },
         repository::MetadataHit,
         state::AppState,
     },
-    services::LyricStore,
+    services::{
+        LyricStore,
+        ranking::merge_and_sort_hits,
+    },
 };
-
-pub struct SearchHit<'a> {
-    pub entry: &'a SongEntry,
-    pub metadata_score: MatchType,
-    pub lyric_hit: Option<LyricHit>,
-}
 
 pub struct LyricService<R = AppState>(PhantomData<R>);
 
@@ -86,7 +77,7 @@ impl<R: LyricStore> LyricService<R> {
         .await;
 
         let sorted_hits =
-            Self::merge_and_sort_hits(&db, metadata_hits, lyric_hits, query.lyric_text.is_some());
+            merge_and_sort_hits(&db, metadata_hits, lyric_hits, query.lyric_text.is_some());
 
         let total = u64::try_from(sorted_hits.len()).unwrap_or(u64::MAX);
 
@@ -152,123 +143,6 @@ impl<R: LyricStore> LyricService<R> {
         } else {
             Vec::new()
         }
-    }
-
-    fn merge_and_sort_hits<'a>(
-        db: &'a LyricIndexDB,
-        metadata_hits: Vec<MetadataHit<'a>>,
-        lyric_hits: Vec<LyricHit>,
-        is_explicit_lyric: bool,
-    ) -> Vec<SearchHit<'a>> {
-        let mut merged_map: HashMap<u64, SearchHit<'a>> = HashMap::new();
-
-        if is_explicit_lyric {
-            let is_full_metadata = metadata_hits.len() == db.entries.len();
-            if is_full_metadata {
-                for l_hit in lyric_hits {
-                    if let Some(&idx) = db.id_idx.get(&l_hit.id) {
-                        merged_map.insert(
-                            l_hit.id,
-                            SearchHit {
-                                entry: &db.entries[idx],
-                                metadata_score: MatchType::Perfect,
-                                lyric_hit: Some(l_hit),
-                            },
-                        );
-                    }
-                }
-            } else {
-                let meta_map: HashMap<u64, MatchType> = metadata_hits
-                    .into_iter()
-                    .map(|h| (h.entry.id, h.score))
-                    .collect();
-
-                for l_hit in lyric_hits {
-                    if let Some(&m_score) = meta_map.get(&l_hit.id)
-                        && let Some(&idx) = db.id_idx.get(&l_hit.id)
-                    {
-                        merged_map.insert(
-                            l_hit.id,
-                            SearchHit {
-                                entry: &db.entries[idx],
-                                metadata_score: m_score,
-                                lyric_hit: Some(l_hit),
-                            },
-                        );
-                    }
-                }
-            }
-        } else {
-            for m_hit in metadata_hits {
-                merged_map.insert(
-                    m_hit.entry.id,
-                    SearchHit {
-                        entry: m_hit.entry,
-                        metadata_score: m_hit.score,
-                        lyric_hit: None,
-                    },
-                );
-            }
-
-            for l_hit in lyric_hits {
-                if let Some(hit) = merged_map.get_mut(&l_hit.id) {
-                    hit.lyric_hit = Some(l_hit);
-                } else if let Some(&idx) = db.id_idx.get(&l_hit.id) {
-                    merged_map.insert(
-                        l_hit.id,
-                        SearchHit {
-                            entry: &db.entries[idx],
-                            metadata_score: MatchType::NoMatch,
-                            lyric_hit: Some(l_hit),
-                        },
-                    );
-                }
-            }
-        }
-
-        let mut sorted_hits: Vec<SearchHit<'a>> = merged_map.into_values().collect();
-
-        let get_priority = |hit: &SearchHit| -> u8 {
-            let has_lyric = hit.lyric_hit.is_some();
-            let is_main = hit
-                .lyric_hit
-                .as_ref()
-                .is_some_and(|l| l.field == LyricMatchField::MainLyric);
-            let meta_strong = hit.metadata_score >= MatchType::Medium;
-            let meta_exists = hit.metadata_score > MatchType::NoMatch;
-
-            if meta_strong {
-                return 5;
-            } else if meta_exists && has_lyric {
-                return 4;
-            } else if is_main {
-                return 3;
-            } else if meta_exists {
-                return 2;
-            } else if has_lyric {
-                return 1;
-            }
-            0
-        };
-
-        sorted_hits.sort_unstable_by(|a, b| {
-            let p_a = get_priority(a);
-            let p_b = get_priority(b);
-
-            p_b.cmp(&p_a)
-                .then_with(|| {
-                    let r_a = a.lyric_hit.as_ref().map_or(1000.0, |l| l.rank);
-                    let r_b = b.lyric_hit.as_ref().map_or(1000.0, |l| l.rank);
-                    r_a.total_cmp(&r_b)
-                })
-                .then_with(|| b.metadata_score.cmp(&a.metadata_score))
-                .then_with(|| b.entry.timestamp.cmp(&a.entry.timestamp))
-                // 候选来自 HashMap，迭代顺序不确定；id 全局唯一，补上它让比较成为
-                // 全序，否则同分同时间戳的条目会在相邻页之间重复或漏掉
-                .then_with(|| a.entry.id.cmp(&b.entry.id))
-        });
-
-        sorted_hits
     }
 
     pub async fn get_lyric(

@@ -68,7 +68,7 @@ lib.rs 路由 → api/<模块>/extractor.rs → api/<模块>/handler.rs → serv
 - `extractor.rs` 从 `RawQuery` 手工解析查询串（不是 axum 的 `Query` 提取器），负责参数校验与优先级。
   例如 `search` 里同时传 `q` 和具体字段时会丢弃 `q`；`get` 的优先级是 `id` > `filename` > 平台 ID 交集。
 - `handler.rs` 保持极薄，只做「提参 → 调 service → 包 JSON」。
-- `services/lyric_service.rs` 是检索编排的核心，定义了 `LyricService<R = AppState>`，面向深模块 trait `LyricStore`（`services/lyric_store.rs`）编程，解耦具体的 I/O 实现。
+- `services/lyric_service.rs` 是检索编排的核心，定义了 `LyricService<R = AppState>`，面向深模块 trait `LyricStore`（`services/lyric_store.rs`）编程。
 - `LyricStore` 统一抽象了 4 个 I/O 接口：`fetch_lyric_ttml`、`fetch_parsed_lyric`、`search_lyrics_fts` 和 `load_index`。生产环境由 `AppState` 实现，测试环境由 `MemoryLyricStore` 适配。
 
 ### 检索评分与合并
@@ -82,8 +82,8 @@ lib.rs 路由 → api/<模块>/extractor.rs → api/<模块>/handler.rs → serv
    单字段的比对细节在 `core/matcher/compare.rs`，档位枚举在 `types.rs`。
 2. 仅当元数据结果偏弱（为空、首条低于 `Medium`、或数量不足 limit）或用户显式传了 `lyricText` 时，
    才追加 SQLite FTS5 正文检索。
-3. `merge_and_sort_hits` 按优先级桶（元数据强命中 > 元数据+正文 > 主歌词命中 > …）排序，
-   同桶内再比 bm25 rank、元数据分、时间戳。
+3. 两路命中的合并与全序排序逻辑位于 `services/ranking.rs`（`merge_and_sort_hits`），按 5 级优先级桶（元数据强命中 > 元数据弱命中+正文 > 主歌词正文命中 > 仅元数据弱命中 > 仅背景人声命中 > 无命中）排序，
+   同桶内再比 BM25 rank、元数据分、时间戳，并由 `entry.id` 提供保底严格全序。算法为纯函数设计，不依赖任何框架与异步环境，便于独立单元测试。
 
 中日文匹配依赖 `core/matcher/normalize.rs` 里的 OpenCC 繁简转换（`convert_tw2s`），
 入库时和查询时都会归一化，改动其中一侧必须同步另一侧，否则已有数据会失配。
