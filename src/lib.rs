@@ -2,6 +2,7 @@ pub use core::{
     db::setup::init_db,
     state::AppState,
 };
+use std::time::Duration;
 
 use axum::{
     Router,
@@ -14,7 +15,14 @@ use sentry_tower::{
     NewSentryLayer,
     SentryHttpLayer,
 };
-use tower_http::trace::TraceLayer;
+use tower_http::trace::{
+    DefaultMakeSpan,
+    TraceLayer,
+};
+use tracing::{
+    Level,
+    info,
+};
 
 use crate::{
     core::error::AppError,
@@ -43,6 +51,18 @@ pub fn create_app(state: AppState) -> Router {
             post(api::webhook::handler::handle_webhook_sync),
         );
 
+    let trace_layer = TraceLayer::new_for_http()
+        .make_span_with(DefaultMakeSpan::new().level(Level::INFO))
+        .on_response(
+            |response: &axum::http::Response<_>, latency: Duration, _span: &tracing::Span| {
+                info!(
+                    status = response.status().as_u16(),
+                    latency_ms = %format_args!("{latency:.2?}"),
+                    "HTTP request completed"
+                );
+            },
+        );
+
     Router::new()
         .nest("/v1", v1_routes.clone())
         .nest("/api/v1", v1_routes)
@@ -50,6 +70,6 @@ pub fn create_app(state: AppState) -> Router {
         .layer(NewSentryLayer::new_from_top())
         .layer(SentryHttpLayer::new().enable_transaction())
         .layer(create_cors_layer())
-        .layer(TraceLayer::new_for_http())
+        .layer(trace_layer)
         .with_state(state)
 }

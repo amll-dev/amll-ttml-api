@@ -24,9 +24,15 @@ async fn main() -> Result<()> {
     dotenvy::dotenv().ok();
 
     let sentry_dsn = env::var("SENTRY_DSN").ok();
+    let traces_sample_rate = env::var("SENTRY_TRACES_SAMPLE_RATE")
+        .ok()
+        .and_then(|v| v.parse::<f32>().ok())
+        .filter(|&rate| (0.0..=1.0).contains(&rate))
+        .unwrap_or(1.0);
 
     let mut options = sentry::ClientOptions::default();
     options.release = sentry::release_name!();
+    options = options.traces_sample_rate(traces_sample_rate);
     let _sentry_guard = sentry::init((sentry_dsn, options));
 
     let sentry_layer = sentry_tracing::layer().event_filter(|md| match *md.level() {
