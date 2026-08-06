@@ -32,6 +32,7 @@ use crate::{
         },
     },
     services::{
+        LyricStore,
         github_fetcher::{
             fetch_and_parse_db,
             fetch_raw_lyric,
@@ -230,5 +231,28 @@ impl AppState {
         }
 
         Ok(hits)
+    }
+}
+
+#[allow(clippy::unused_async_trait_impl)]
+impl LyricStore for AppState {
+    async fn fetch_lyric_ttml(&self, filename: &str) -> Result<String, AppError> {
+        self.fetch_lyric_ttml(filename).await
+    }
+
+    async fn fetch_parsed_lyric(&self, filename: &str) -> Result<TTMLFormatResult, AppError> {
+        self.fetch_parsed_lyric(filename).await
+    }
+
+    async fn search_lyrics_fts(
+        &self,
+        keyword: &str,
+        limit: u64,
+    ) -> Result<Vec<LyricHit>, AppError> {
+        self.search_lyrics_fts(keyword, limit).await
+    }
+
+    async fn load_index(&self) -> Arc<LyricIndexDB> {
+        self.db.load_full()
     }
 }

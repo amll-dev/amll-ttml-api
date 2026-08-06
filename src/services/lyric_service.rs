@@ -1,4 +1,7 @@
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    marker::PhantomData,
+};
 
 use futures::StreamExt;
 
@@ -34,6 +37,7 @@ use crate::{
         repository::MetadataHit,
         state::AppState,
     },
+    services::LyricStore,
 };
 
 pub struct SearchHit<'a> {
@@ -42,9 +46,9 @@ pub struct SearchHit<'a> {
     pub lyric_hit: Option<LyricHit>,
 }
 
-pub struct LyricService;
+pub struct LyricService<R = AppState>(PhantomData<R>);
 
-impl LyricService {
+impl<R: LyricStore> LyricService<R> {
     const CONCURRENT_FETCH_LIMIT: usize = 10;
 
     /// FTS 候选窗口相对页大小的冗余倍数
@@ -65,15 +69,15 @@ impl LyricService {
     }
 
     pub async fn search_lyric(
-        state: &AppState,
+        store: &R,
         query: &SearchQuery,
         pagination: Pagination,
     ) -> ApiResponse<SearchData> {
-        let db = state.db.load_full();
+        let db = store.load_index().await;
         let metadata_hits = db.search_by_fields(query);
 
         let lyric_hits = Self::fetch_lyric_hits_if_needed(
-            state,
+            store,
             query,
             &metadata_hits,
             pagination.take(),
@@ -117,7 +121,7 @@ impl LyricService {
     }
 
     async fn fetch_lyric_hits_if_needed(
-        state: &AppState,
+        store: &R,
         query: &SearchQuery,
         metadata_hits: &[MetadataHit<'_>],
         page_size: usize,
@@ -138,7 +142,7 @@ impl LyricService {
         };
 
         if let Some(ref kw) = fts_keyword {
-            match state.search_lyrics_fts(kw, fts_window).await {
+            match store.search_lyrics_fts(kw, fts_window).await {
                 Ok(hits) => hits,
                 Err(e) => {
                     tracing::error!("SQLite FTS5 lyric search failed for keyword '{kw}': {e:?}");
@@ -268,11 +272,11 @@ impl LyricService {
     }
 
     pub async fn get_lyric(
-        state: &AppState,
+        store: &R,
         query: IdQuery,
         format: String,
     ) -> Result<ApiResponse<SongItem>, AppError> {
-        let db = state.db.load();
+        let db = store.load_index().await;
         let matched_indices = db.find_by_ids(&query);
 
         if matched_indices.is_empty() {
@@ -288,7 +292,7 @@ impl LyricService {
         let latest_song_cloned = candidates[0].clone();
         drop(db);
 
-        let ttml_text = state
+        let ttml_text = store
             .fetch_lyric_ttml(latest_song_cloned.filename.as_str())
             .await?;
 
@@ -301,11 +305,11 @@ impl LyricService {
     }
 
     pub async fn lrclib_search(
-        state: &AppState,
+        store: &R,
         query: &SearchQuery,
         pagination: Pagination,
     ) -> Vec<LrclibSongItem> {
-        let db = state.db.load();
+        let db = store.load_index().await;
 
         let matched_hits = db.search_by_fields(query);
         let entries: Vec<_> = matched_hits
@@ -319,7 +323,7 @@ impl LyricService {
 
         futures::stream::iter(entries)
             .map(|entry| async move {
-                let formatted = match state.fetch_parsed_lyric(entry.filename.as_str()).await {
+                let formatted = match store.fetch_parsed_lyric(entry.filename.as_str()).await {
                     Ok(f) => Some(f),
                     Err(e) => {
                         tracing::warn!(
@@ -337,10 +341,10 @@ impl LyricService {
     }
 
     pub async fn lrclib_get_by_fields(
-        state: &AppState,
+        store: &R,
         query: SearchQuery,
     ) -> Result<LrclibSongItem, AppError> {
-        let db = state.db.load();
+        let db = store.load_index().await;
         let matched_hits = db.search_by_fields(&query);
 
         if matched_hits.is_empty() {
@@ -356,24 +360,271 @@ impl LyricService {
         let latest_song_cloned = best_hit.entry.clone();
         drop(db);
 
-        let formatted = state
+        let formatted = store
             .fetch_parsed_lyric(latest_song_cloned.filename.as_str())
             .await?;
         let item = map_to_lrclib_item(&latest_song_cloned, Some(&formatted));
         Ok(item)
     }
 
-    pub async fn lrclib_get_by_id(state: &AppState, id: u64) -> Result<LrclibSongItem, AppError> {
-        let db = state.db.load();
+    pub async fn lrclib_get_by_id(store: &R, id: u64) -> Result<LrclibSongItem, AppError> {
+        let db = store.load_index().await;
 
         let idx = db.id_idx.get(&id).copied().ok_or(AppError::LyricNotFound)?;
         let song_cloned = db.entries[idx].clone();
         drop(db);
 
-        let formatted = state
+        let formatted = store
             .fetch_parsed_lyric(song_cloned.filename.as_str())
             .await?;
         let item = map_to_lrclib_item(&song_cloned, Some(&formatted));
         Ok(item)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        collections::HashMap,
+        sync::Arc,
+    };
+
+    use super::*;
+    use crate::{
+        core::{
+            models::{
+                IdQuery,
+                LyricHit,
+                LyricIndexDB,
+                LyricMatchField,
+                SearchQuery,
+            },
+            test_utils::{
+                build_test_db,
+                make_song,
+            },
+        },
+        services::LyricStore,
+        utils::ttml::{
+            TTMLFormatResult,
+            parse_and_format_ttml,
+        },
+    };
+
+    #[derive(Default)]
+    pub struct MemoryLyricStore {
+        pub db: Arc<LyricIndexDB>,
+        pub ttml_map: HashMap<String, String>,
+        pub fts_results: HashMap<String, Vec<LyricHit>>,
+    }
+
+    #[allow(clippy::unused_async_trait_impl)]
+    impl LyricStore for MemoryLyricStore {
+        async fn fetch_lyric_ttml(&self, filename: &str) -> Result<String, AppError> {
+            self.ttml_map
+                .get(filename)
+                .cloned()
+                .ok_or(AppError::LyricNotFound)
+        }
+
+        async fn fetch_parsed_lyric(&self, filename: &str) -> Result<TTMLFormatResult, AppError> {
+            let ttml = self.fetch_lyric_ttml(filename).await?;
+            Ok(parse_and_format_ttml(&ttml))
+        }
+
+        async fn search_lyrics_fts(
+            &self,
+            keyword: &str,
+            _limit: u64,
+        ) -> Result<Vec<LyricHit>, AppError> {
+            Ok(self.fts_results.get(keyword).cloned().unwrap_or_default())
+        }
+
+        async fn load_index(&self) -> Arc<LyricIndexDB> {
+            Arc::clone(&self.db)
+        }
+    }
+
+    fn sample_ttml() -> String {
+        r#"<?xml version="1.0" encoding="utf-8"?>
+<tt xmlns="http://www.w3.org/ns/ttml">
+  <body>
+    <div>
+      <p begin="00:01.000" end="00:03.000">Hello World Lyric</p>
+    </div>
+  </body>
+</tt>"#
+            .to_string()
+    }
+
+    fn create_test_store() -> (MemoryLyricStore, u64, u64) {
+        let entry1 = make_song(
+            "test_song_one.ttml",
+            1_600_000_000,
+            &["Test Song One"],
+            &["Artist Alpha"],
+            &["1001"],
+            &["sp1001"],
+            &[],
+            &[],
+        );
+        let id1 = entry1.id;
+
+        let entry2 = make_song(
+            "test_song_two.ttml",
+            1_700_000_000,
+            &["Test Song Two"],
+            &["Artist Beta"],
+            &["1002"],
+            &["sp1002"],
+            &[],
+            &[],
+        );
+        let id2 = entry2.id;
+
+        let db = build_test_db(vec![entry1, entry2]);
+        let mut ttml_map = HashMap::new();
+        ttml_map.insert("test_song_one.ttml".to_string(), sample_ttml());
+        ttml_map.insert("test_song_two.ttml".to_string(), sample_ttml());
+
+        let mut fts_results = HashMap::new();
+        fts_results.insert(
+            "Hello".to_string(),
+            vec![LyricHit {
+                id: id1,
+                rank: 0.1,
+                field: LyricMatchField::MainLyric,
+                snippet: Some("Hello World Lyric".to_string()),
+            }],
+        );
+
+        (
+            MemoryLyricStore {
+                db: Arc::new(db),
+                ttml_map,
+                fts_results,
+            },
+            id1,
+            id2,
+        )
+    }
+
+    #[tokio::test]
+    async fn test_search_lyric_basic() {
+        let (store, id1, _) = create_test_store();
+        let query = SearchQuery {
+            track_name: Some("Test Song One".to_string()),
+            ..Default::default()
+        };
+        let pagination = Pagination {
+            page: 1,
+            page_size: 10,
+        };
+
+        let res = LyricService::search_lyric(&store, &query, pagination).await;
+        assert_eq!(res.status, 200);
+        assert_eq!(res.data.items.len(), 1);
+        assert_eq!(res.data.items[0].id, id1);
+        assert_eq!(res.data.pagination.total, 1);
+    }
+
+    #[tokio::test]
+    async fn test_search_lyric_fts() {
+        let (store, id1, _) = create_test_store();
+        let query = SearchQuery {
+            lyric_text: Some("Hello".to_string()),
+            ..Default::default()
+        };
+        let pagination = Pagination {
+            page: 1,
+            page_size: 10,
+        };
+
+        let res = LyricService::search_lyric(&store, &query, pagination).await;
+        assert_eq!(res.status, 200);
+        assert_eq!(res.data.items.len(), 1);
+        assert_eq!(res.data.items[0].id, id1);
+        assert!(res.data.items[0].match_context.is_some());
+        assert_eq!(
+            res.data.items[0]
+                .match_context
+                .as_ref()
+                .unwrap()
+                .snippet
+                .as_deref(),
+            Some("Hello World Lyric")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_get_lyric_success_and_not_found() {
+        let (store, id1, _) = create_test_store();
+        let query = IdQuery {
+            spotify_ids: vec!["sp1001".to_string()],
+            ..Default::default()
+        };
+
+        let res = LyricService::get_lyric(&store, query, "ttml".to_string()).await;
+        assert!(res.is_ok());
+        let item = res.unwrap().data;
+        assert_eq!(item.id, id1);
+
+        let invalid_query = IdQuery {
+            spotify_ids: vec!["non_existent".to_string()],
+            ..Default::default()
+        };
+        let err_res = LyricService::get_lyric(&store, invalid_query, "ttml".to_string()).await;
+        assert!(matches!(err_res, Err(AppError::LyricNotFound)));
+    }
+
+    #[tokio::test]
+    async fn test_lrclib_search() {
+        let (store, _, _) = create_test_store();
+        let query = SearchQuery {
+            global_keyword: Some("Artist".to_string()),
+            ..Default::default()
+        };
+        let pagination = Pagination {
+            page: 1,
+            page_size: 10,
+        };
+
+        let items = LyricService::lrclib_search(&store, &query, pagination).await;
+        assert_eq!(items.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_lrclib_get_by_fields() {
+        let (store, id1, _) = create_test_store();
+        let query = SearchQuery {
+            track_name: Some("Test Song One".to_string()),
+            artist_name: Some("Artist Alpha".to_string()),
+            ..Default::default()
+        };
+
+        let item = LyricService::lrclib_get_by_fields(&store, query).await;
+        assert!(item.is_ok());
+        let song = item.unwrap();
+        assert_eq!(song.id, id1);
+        assert_eq!(song.track_name, "Test Song One");
+        assert!(song.synced_lyrics.is_some());
+
+        let no_match_query = SearchQuery {
+            track_name: Some("NonExistentTrack".to_string()),
+            ..Default::default()
+        };
+        let err = LyricService::lrclib_get_by_fields(&store, no_match_query).await;
+        assert!(matches!(err, Err(AppError::LyricNotFound)));
+    }
+
+    #[tokio::test]
+    async fn test_lrclib_get_by_id() {
+        let (store, _, id2) = create_test_store();
+        let item = LyricService::lrclib_get_by_id(&store, id2).await;
+        assert!(item.is_ok());
+        assert_eq!(item.unwrap().id, id2);
+
+        let err = LyricService::lrclib_get_by_id(&store, 9999).await;
+        assert!(matches!(err, Err(AppError::LyricNotFound)));
     }
 }

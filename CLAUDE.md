@@ -62,13 +62,14 @@ cargo build --release
 ### 请求分层
 
 ```
-lib.rs 路由 → api/<模块>/extractor.rs → api/<模块>/handler.rs → services/lyric_service.rs → core/repository.rs + core/state.rs
+lib.rs 路由 → api/<模块>/extractor.rs → api/<模块>/handler.rs → services/lyric_service.rs (LyricService<R: LyricStore>) → LyricStore Trait (AppState / MemoryLyricStore)
 ```
 
 - `extractor.rs` 从 `RawQuery` 手工解析查询串（不是 axum 的 `Query` 提取器），负责参数校验与优先级。
   例如 `search` 里同时传 `q` 和具体字段时会丢弃 `q`；`get` 的优先级是 `id` > `filename` > 平台 ID 交集。
 - `handler.rs` 保持极薄，只做「提参 → 调 service → 包 JSON」。
-- `services/lyric_service.rs` 是检索编排的核心，见下。
+- `services/lyric_service.rs` 是检索编排的核心，定义了 `LyricService<R = AppState>`，面向深模块 trait `LyricStore`（`services/lyric_store.rs`）编程，解耦具体的 I/O 实现。
+- `LyricStore` 统一抽象了 4 个 I/O 接口：`fetch_lyric_ttml`、`fetch_parsed_lyric`、`search_lyrics_fts` 和 `load_index`。生产环境由 `AppState` 实现，测试环境由 `MemoryLyricStore` 适配。
 
 ### 检索评分与合并
 
