@@ -72,6 +72,7 @@ lib.rs 路由 → api/<模块>/extractor.rs → api/<模块>/handler.rs → serv
 - `handler.rs` 保持极薄，只做「提参 → 调 service → 包 JSON」。
 - `services/lyric_service.rs` 是检索编排的核心，定义了 `LyricService<R = AppState>`，面向深模块 trait `LyricStore`（`services/lyric_store.rs`）编程。
 - `LyricStore` 统一抽象了 4 个 I/O 接口：`fetch_lyric_ttml`、`fetch_parsed_lyric`、`search_lyrics_fts` 和 `load_index`。生产环境由 `AppState` 实现，测试环境由 `MemoryLyricStore` 适配。
+- 分页机制由 `api::shared::pagination` 中的 `paginate` 组合器统一收转，提供安全步长切片与 `PaginationInfo` 分页元数据生成；FTS5 正文补全触发条件独立于 `page_size`，由业务常量 `FTS_TRIGGER_MIN_HITS` 专属判定。
 
 ### 检索评分与合并
 

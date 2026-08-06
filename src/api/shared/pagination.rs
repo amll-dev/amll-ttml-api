@@ -1,4 +1,7 @@
-use crate::core::error::AppError;
+use crate::{
+    api::shared::dto::PaginationInfo,
+    core::error::AppError,
+};
 
 pub const DEFAULT_PAGE: u64 = 1;
 pub const DEFAULT_PAGE_SIZE: u64 = 50;
@@ -93,6 +96,42 @@ fn parse_positive(raw: &str, field: &str) -> Result<u64, AppError> {
     Ok(value)
 }
 
+/// 分页组合器输出结果，包含当前页的切片数据与完整的分页元数据信息
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Paginated<T> {
+    pub items: Vec<T>,
+    pub pagination: PaginationInfo,
+}
+
+/// 泛型组合器：对全量 slice 或 Iterator 进行安全的 offset/take 内存分页，并自动构建完整的
+/// [`PaginationInfo`] 元数据
+pub fn paginate<T, I, F, R>(items: I, pagination: Pagination, mut transform: F) -> Paginated<R>
+where
+    I: IntoIterator<Item = T>,
+    I::IntoIter: ExactSizeIterator,
+    F: FnMut(T) -> R,
+{
+    let iter = items.into_iter();
+    let total = u64::try_from(iter.len()).unwrap_or(u64::MAX);
+
+    let paged_items: Vec<R> = iter
+        .skip(pagination.offset())
+        .take(pagination.take())
+        .map(&mut transform)
+        .collect();
+
+    Paginated {
+        items: paged_items,
+        pagination: PaginationInfo {
+            page: pagination.page,
+            page_size: pagination.page_size,
+            total,
+            total_pages: pagination.total_pages(total),
+            has_more: pagination.has_more(total),
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -169,5 +208,23 @@ mod tests {
         let p = Pagination::from_raw(Some(&u64::MAX.to_string()), Some("100")).unwrap();
         assert_eq!(p.offset(), usize::MAX);
         assert!(!p.has_more(1000));
+    }
+
+    #[test]
+    fn test_paginate_combinator() {
+        let data: Vec<i32> = (1..=25).collect();
+        let pagination = Pagination::from_raw(Some("2"), Some("10")).unwrap();
+
+        let paginated = paginate(data, pagination, |x| x * 2);
+
+        assert_eq!(
+            paginated.items,
+            vec![22, 24, 26, 28, 30, 32, 34, 36, 38, 40]
+        );
+        assert_eq!(paginated.pagination.page, 2);
+        assert_eq!(paginated.pagination.page_size, 10);
+        assert_eq!(paginated.pagination.total, 25);
+        assert_eq!(paginated.pagination.total_pages, 3);
+        assert!(paginated.pagination.has_more);
     }
 }

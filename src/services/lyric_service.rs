@@ -12,12 +12,11 @@ use crate::{
             dto::{
                 ApiResponse,
                 MatchContext,
-                PaginationInfo,
                 SearchData,
                 SongItem,
                 map_song_to_item,
             },
-            pagination::Pagination,
+            pagination::{Pagination, paginate},
         },
     },
     core::{
@@ -50,6 +49,8 @@ impl<R: LyricStore> LyricService<R> {
     const FTS_WINDOW_FACTOR: u64 = 3;
     /// FTS 候选窗口上限，防止深翻页把 SQL LIMIT 撑到不可控
     const FTS_WINDOW_CAP: u64 = 500;
+    /// 元数据粗筛命中数量低于此阈值时，认为元数据命中所选偏弱，触发 FTS5 正文检索补全
+    const FTS_TRIGGER_MIN_HITS: usize = 10;
 
     /// 按翻页深度动态放大 FTS 候选窗口，并限制到 `FTS_WINDOW_CAP`
     fn fts_window(pagination: Pagination) -> u64 {
@@ -72,7 +73,6 @@ impl<R: LyricStore> LyricService<R> {
             store,
             query,
             &metadata_hits,
-            pagination.take(),
             Self::fts_window(pagination),
         )
         .await;
@@ -80,34 +80,21 @@ impl<R: LyricStore> LyricService<R> {
         let sorted_hits =
             merge_and_sort_hits(&db, metadata_hits, lyric_hits, query.lyric_text.is_some());
 
-        let total = u64::try_from(sorted_hits.len()).unwrap_or(u64::MAX);
+        let paginated = paginate(sorted_hits, pagination, |hit| {
+            let match_context = hit.lyric_hit.and_then(|lyric| {
+                lyric.snippet.map(|snippet| MatchContext {
+                    snippet: Some(snippet),
+                })
+            });
 
-        let items: Vec<SongItem> = sorted_hits
-            .into_iter()
-            .skip(pagination.offset())
-            .take(pagination.take())
-            .map(|hit| {
-                let match_context = hit.lyric_hit.and_then(|lyric| {
-                    lyric.snippet.map(|snippet| MatchContext {
-                        snippet: Some(snippet),
-                    })
-                });
-
-                map_song_to_item(hit.entry, None, None, match_context)
-            })
-            .collect();
+            map_song_to_item(hit.entry, None, None, match_context)
+        });
 
         ApiResponse {
             status: 200,
             data: SearchData {
-                items,
-                pagination: PaginationInfo {
-                    page: pagination.page,
-                    page_size: pagination.page_size,
-                    total,
-                    total_pages: pagination.total_pages(total),
-                    has_more: pagination.has_more(total),
-                },
+                items: paginated.items,
+                pagination: paginated.pagination,
             },
         }
     }
@@ -116,7 +103,6 @@ impl<R: LyricStore> LyricService<R> {
         store: &R,
         query: &SearchQuery,
         metadata_hits: &[MetadataHit<'_>],
-        page_size: usize,
         fts_window: u64,
     ) -> Vec<LyricHit> {
         // 计算仅凭元数据搜索的结果是否较弱，如果较低，或者结果较少，我们需要继续匹配歌词正文
@@ -125,7 +111,7 @@ impl<R: LyricStore> LyricService<R> {
             || metadata_hits
                 .first()
                 .is_none_or(|h| h.score < MatchType::Medium)
-            || metadata_hits.len() < page_size;
+            || metadata_hits.len() < Self::FTS_TRIGGER_MIN_HITS;
 
         let fts_keyword = match (&query.lyric_text, &query.global_keyword) {
             (Some(explicit), _) => Some(explicit.clone()),
@@ -187,16 +173,11 @@ impl<R: LyricStore> LyricService<R> {
         let db = store.load_index().await;
 
         let matched_hits = db.search_by_fields(query);
-        let entries: Vec<_> = matched_hits
-            .into_iter()
-            .skip(pagination.offset())
-            .take(pagination.take())
-            .map(|hit| hit.entry.clone())
-            .collect();
+        let paginated = paginate(matched_hits, pagination, |hit| hit.entry.clone());
 
         drop(db);
 
-        futures::stream::iter(entries)
+        futures::stream::iter(paginated.items)
             .map(|entry| async move {
                 let formatted = match store.fetch_parsed_lyric(entry.filename.as_str()).await {
                     Ok(f) => Some(f),
