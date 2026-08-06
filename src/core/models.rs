@@ -3,9 +3,9 @@ use std::collections::HashMap;
 use compact_str::CompactString;
 use serde::Deserialize;
 
-use crate::{
-    core::matcher::normalize_name_for_comparison,
-    utils::id::generate_file_id,
+use crate::core::{
+    LyricId,
+    matcher::normalize_name_for_comparison,
 };
 
 #[derive(Deserialize, Debug, Clone)]
@@ -17,7 +17,7 @@ pub struct RawIndexEntry {
 
 #[derive(Clone, Debug)]
 pub struct SongEntry {
-    pub id: u64,
+    pub id: LyricId,
     pub filename: CompactString,
     pub timestamp: u64,
 
@@ -51,7 +51,7 @@ impl From<RawIndexEntry> for SongEntry {
             .and_then(|ts_str| ts_str.parse::<u64>().ok())
             .unwrap_or(0);
 
-        let id = generate_file_id(&raw.raw_lyric_file);
+        let id = LyricId::from_filename(&raw.raw_lyric_file);
 
         let mut song = Self {
             id,
@@ -126,7 +126,7 @@ impl From<RawIndexEntry> for SongEntry {
 #[derive(Default)]
 pub struct LyricIndexDB {
     pub entries: Vec<SongEntry>,
-    pub id_idx: HashMap<u64, usize>,
+    pub id_idx: HashMap<LyricId, usize>,
 
     pub ncm_idx: HashMap<CompactString, Vec<usize>>,
     pub qq_idx: HashMap<CompactString, Vec<usize>>,
@@ -141,7 +141,7 @@ pub struct LyricIndexDB {
 
 #[derive(Default)]
 pub struct IdQuery {
-    pub id: Option<u64>,
+    pub id: Option<LyricId>,
     pub filename: Option<String>,
 
     pub ncm_music_ids: Vec<String>,
@@ -173,7 +173,7 @@ pub enum LyricMatchField {
 
 #[derive(Debug, Clone)]
 pub struct LyricHit {
-    pub id: u64,
+    pub id: LyricId,
     pub rank: f64,
     pub field: LyricMatchField,
     pub snippet: Option<String>,

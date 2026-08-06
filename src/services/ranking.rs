@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use crate::core::{
+    LyricId,
     matcher::MatchType,
     models::{
         LyricHit,
@@ -23,7 +24,7 @@ pub fn merge_and_sort_hits<'a>(
     lyric_hits: Vec<LyricHit>,
     is_explicit_lyric: bool,
 ) -> Vec<SearchHit<'a>> {
-    let mut merged_map: HashMap<u64, SearchHit<'a>> = HashMap::new();
+    let mut merged_map: HashMap<LyricId, SearchHit<'a>> = HashMap::new();
 
     if is_explicit_lyric {
         let is_full_metadata = metadata_hits.len() == db.entries.len();
@@ -41,7 +42,7 @@ pub fn merge_and_sort_hits<'a>(
                 }
             }
         } else {
-            let meta_map: HashMap<u64, MatchType> = metadata_hits
+            let meta_map: HashMap<LyricId, MatchType> = metadata_hits
                 .into_iter()
                 .map(|h| (h.entry.id, h.score))
                 .collect();
@@ -402,7 +403,7 @@ mod tests {
 
         // 包含不存在的悬挂 ID (999999)
         let lyric_hits = vec![LyricHit {
-            id: 999_999,
+            id: LyricId::from_u64(999_999).unwrap(),
             rank: 0.1,
             field: LyricMatchField::MainLyric,
             snippet: None,

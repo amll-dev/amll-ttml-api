@@ -59,6 +59,8 @@ cargo build --release
 `AppState`（`core/state.rs`）同时持有两者，并挂了两层 moka 缓存：`ttml_cache`（原始 TTML）和
 `formatted_lyric_cache`（转成 LRC/纯文本的结果），TTL 均为 168 小时。
 
+`LyricId`（`core/lyric_id.rs`）是歌词 ID 的强类型表示，封装 53 位 JavaScript Safe Integer 安全区间 (`0 ..= 0x001F_FFFF_FFFF_FFFF`)，提供边界校验、字符串解析以及由文件名生成哈希 ID 的统一接口。
+
 ### 请求分层
 
 ```

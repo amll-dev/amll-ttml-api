@@ -1,12 +1,15 @@
 use compact_str::CompactString;
 use serde::Serialize;
 
-use crate::core::models::SongEntry;
+use crate::core::{
+    LyricId,
+    models::SongEntry,
+};
 
 #[derive(Serialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct SongItem {
-    pub id: u64,
+    pub id: LyricId,
     pub filename: String,
 
     pub music_names: Box<[CompactString]>,
@@ -97,13 +100,12 @@ mod tests {
     use compact_str::CompactString;
 
     use super::*;
-    use crate::utils::id::generate_file_id;
 
     #[test]
     fn map_song_to_item_includes_id() {
         let filename = "1768754400682-250306205-r6IrpmBd.ttml";
         let song = SongEntry {
-            id: generate_file_id(filename),
+            id: LyricId::from_filename(filename),
             filename: CompactString::new(filename),
             timestamp: 1,
             track_names: vec![CompactString::new("ME!")].into_boxed_slice(),
@@ -127,7 +129,7 @@ mod tests {
 
         let json = serde_json::to_value(&item).unwrap();
         assert!(json.get("id").unwrap().is_number());
-        assert_eq!(json.get("id").unwrap().as_u64().unwrap(), song.id);
+        assert_eq!(json.get("id").unwrap().as_u64().unwrap(), song.id.get());
     }
 
     #[test]

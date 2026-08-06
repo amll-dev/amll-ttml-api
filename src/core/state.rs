@@ -22,6 +22,7 @@ use tracing::{
 
 use crate::{
     core::{
+        LyricId,
         db::entity,
         error::AppError,
         matcher::convert_tw2s,
@@ -223,7 +224,7 @@ impl AppState {
                 .unwrap_or((LyricMatchField::MainLyric, None));
 
             hits.push(LyricHit {
-                id: id.cast_unsigned(),
+                id: LyricId::from_u64_masked(id.cast_unsigned()),
                 rank,
                 field,
                 snippet,

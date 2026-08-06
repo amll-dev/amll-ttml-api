@@ -21,6 +21,7 @@ use crate::{
         },
     },
     core::{
+        LyricId,
         error::AppError,
         matcher::MatchType,
         models::{
@@ -241,7 +242,7 @@ impl<R: LyricStore> LyricService<R> {
         Ok(item)
     }
 
-    pub async fn lrclib_get_by_id(store: &R, id: u64) -> Result<LrclibSongItem, AppError> {
+    pub async fn lrclib_get_by_id(store: &R, id: LyricId) -> Result<LrclibSongItem, AppError> {
         let db = store.load_index().await;
 
         let idx = db.id_idx.get(&id).copied().ok_or(AppError::LyricNotFound)?;
@@ -331,7 +332,7 @@ mod tests {
             .to_string()
     }
 
-    fn create_test_store() -> (MemoryLyricStore, u64, u64) {
+    fn create_test_store() -> (MemoryLyricStore, LyricId, LyricId) {
         let entry1 = make_song(
             "test_song_one.ttml",
             1_600_000_000,
@@ -498,7 +499,7 @@ mod tests {
         assert!(item.is_ok());
         assert_eq!(item.unwrap().id, id2);
 
-        let err = LyricService::lrclib_get_by_id(&store, 9999).await;
+        let err = LyricService::lrclib_get_by_id(&store, LyricId::from_u64(9999).unwrap()).await;
         assert!(matches!(err, Err(AppError::LyricNotFound)));
     }
 }

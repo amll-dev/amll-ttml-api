@@ -163,9 +163,12 @@ impl LyricIndexDB {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::test_utils::{
-        build_test_db,
-        make_song,
+    use crate::core::{
+        LyricId,
+        test_utils::{
+            build_test_db,
+            make_song,
+        },
     };
 
     // --- find_by_ids tests ---
@@ -217,7 +220,7 @@ mod tests {
             &[],
         )]);
         let query = IdQuery {
-            id: Some(999_999),
+            id: Some(LyricId::from_u64(999_999).unwrap()),
             ..Default::default()
         };
         let result = db.find_by_ids(&query);

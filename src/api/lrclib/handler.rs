@@ -14,6 +14,7 @@ use crate::{
         extract_lrclib_search_query,
     },
     core::{
+        LyricId,
         error::AppError,
         state::AppState,
     },
@@ -44,6 +45,7 @@ pub async fn handle_get_by_id(
     State(state): State<AppState>,
     Path(id): Path<u64>,
 ) -> Result<impl IntoResponse, AppError> {
-    let item = LyricService::lrclib_get_by_id(&state, id).await?;
+    let lyric_id = LyricId::from_u64(id)?;
+    let item = LyricService::lrclib_get_by_id(&state, lyric_id).await?;
     Ok(Json(item))
 }

@@ -3,9 +3,9 @@
 use compact_str::CompactString;
 
 use super::normalize::normalize_name_for_comparison;
-use crate::{
-    core::models::SongEntry,
-    utils::id::generate_file_id,
+use crate::core::{
+    LyricId,
+    models::SongEntry,
 };
 
 pub fn make_entry(track_names: &[&str], artist_names: &[&str], album_names: &[&str]) -> SongEntry {
@@ -30,7 +30,7 @@ pub fn make_full_entry(
     };
 
     SongEntry {
-        id: generate_file_id("test.ttml"),
+        id: LyricId::from_filename("test.ttml"),
         filename: CompactString::new("test.ttml"),
         timestamp: 0,
         track_names: raw(track_names),

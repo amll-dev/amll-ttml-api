@@ -3,6 +3,7 @@ use url::form_urlencoded;
 use crate::{
     api::shared::pagination::Pagination,
     core::{
+        LyricId,
         error::AppError,
         models::{
             IdQuery,
@@ -220,17 +221,11 @@ pub fn parse_get_query(query_str: &str) -> Result<GetQuery, AppError> {
             continue;
         }
         match k.as_ref() {
-            "id" => match val.parse::<u64>() {
-                Ok(parsed_id) if parsed_id <= 0x001F_FFFF_FFFF_FFFF => {
-                    query.id = Some(parsed_id);
-                    has_param = true;
-                }
-                _ => {
-                    return Err(AppError::BadRequest(
-                        "Invalid ID format. Must be an unsigned integer between 0 and 9007199254740991.".into(),
-                    ));
-                }
-            },
+            "id" => {
+                let parsed_id = LyricId::parse(&val)?;
+                query.id = Some(parsed_id);
+                has_param = true;
+            }
             "filename" => {
                 query.filename = Some(val);
                 has_param = true;
@@ -611,7 +606,10 @@ mod tests {
     #[test]
     fn get_valid_id_parsed_correctly() {
         let result = parse_get_query("id=269710089745311").unwrap();
-        assert_eq!(result.id_query.id, Some(269_710_089_745_311));
+        assert_eq!(
+            result.id_query.id,
+            Some(LyricId::from_u64(269_710_089_745_311).unwrap())
+        );
     }
 
     #[test]
@@ -626,7 +624,7 @@ mod tests {
     #[test]
     fn get_id_with_other_params() {
         let result = parse_get_query("id=12345&ncmMusicId=111").unwrap();
-        assert_eq!(result.id_query.id, Some(12345));
+        assert_eq!(result.id_query.id, Some(LyricId::from_u64(12345).unwrap()));
         assert_eq!(result.id_query.ncm_music_ids, vec!["111"]);
     }
 }

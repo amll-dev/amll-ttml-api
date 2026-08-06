@@ -36,16 +36,14 @@ use tracing::{
 };
 use zip::read::ZipArchive;
 
-use crate::{
-    core::{
-        db::entity::{
-            self,
-            meta,
-        },
-        matcher::normalize_name_for_comparison,
-        models::RawIndexEntry,
+use crate::core::{
+    LyricId,
+    db::entity::{
+        self,
+        meta,
     },
-    utils::id::generate_file_id,
+    matcher::normalize_name_for_comparison,
+    models::RawIndexEntry,
 };
 
 const DB_BASE: &str = "https://raw.githubusercontent.com/amll-dev/amll-ttml-db/main";
@@ -427,7 +425,7 @@ pub fn build_entity_from_ttml(
         .and_then(|ts_str| ts_str.parse::<i64>().ok())
         .unwrap_or(0);
 
-    let id = generate_file_id(filename).cast_signed();
+    let id = LyricId::from_filename(filename).get().cast_signed();
     let meta = &result.metadata;
 
     let flatten_vec = |v: &Option<Vec<String>>| -> serde_json::Value {

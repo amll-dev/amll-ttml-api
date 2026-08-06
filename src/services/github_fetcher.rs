@@ -4,6 +4,7 @@ use compact_str::CompactString;
 use reqwest::Client;
 
 use crate::core::{
+    LyricId,
     error::AppError,
     models::{
         LyricIndexDB,
@@ -25,7 +26,7 @@ pub async fn fetch_and_parse_db(client: &Client) -> Result<LyricIndexDB, AppErro
 
     let text = res.text().await?;
     let mut entries: Vec<SongEntry> = Vec::new();
-    let mut id_idx: HashMap<u64, usize> = HashMap::new();
+    let mut id_idx: HashMap<LyricId, usize> = HashMap::new();
 
     let mut ncm_idx: HashMap<CompactString, Vec<usize>> = HashMap::new();
     let mut qq_idx: HashMap<CompactString, Vec<usize>> = HashMap::new();

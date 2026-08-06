@@ -2,15 +2,13 @@ use std::collections::HashMap;
 
 use compact_str::CompactString;
 
-use crate::{
-    core::{
-        matcher::normalize_name_for_comparison,
-        models::{
-            LyricIndexDB,
-            SongEntry,
-        },
+use crate::core::{
+    LyricId,
+    matcher::normalize_name_for_comparison,
+    models::{
+        LyricIndexDB,
+        SongEntry,
     },
-    utils::id::generate_file_id,
 };
 
 #[allow(clippy::too_many_arguments)]
@@ -25,7 +23,7 @@ pub fn make_song(
     author_usernames: &[&str],
 ) -> SongEntry {
     SongEntry {
-        id: generate_file_id(filename),
+        id: LyricId::from_filename(filename),
         filename: CompactString::new(filename),
         timestamp,
         track_names: track_names.iter().map(|s| CompactString::new(*s)).collect(),
@@ -57,7 +55,7 @@ pub fn make_song(
 }
 
 pub fn build_test_db(songs: Vec<SongEntry>) -> LyricIndexDB {
-    let mut id_idx: HashMap<u64, usize> = HashMap::new();
+    let mut id_idx: HashMap<LyricId, usize> = HashMap::new();
     let mut ncm_idx: HashMap<CompactString, Vec<usize>> = HashMap::new();
     let mut spotify_idx: HashMap<CompactString, Vec<usize>> = HashMap::new();
     let mut author_id_idx: HashMap<CompactString, Vec<usize>> = HashMap::new();

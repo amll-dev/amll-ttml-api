@@ -1,14 +1,17 @@
 use serde::Serialize;
 
 use crate::{
-    core::models::SongEntry,
+    core::{
+        LyricId,
+        models::SongEntry,
+    },
     utils::ttml::TTMLFormatResult,
 };
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LrclibSongItem {
-    pub id: u64,
+    pub id: LyricId,
     pub name: String,
     pub track_name: String,
     pub artist_name: String,
@@ -62,7 +65,7 @@ mod tests {
 
     fn make_test_entry() -> SongEntry {
         SongEntry {
-            id: 9_007_199_254_740_991,
+            id: LyricId::from_u64_masked(LyricId::MAX),
             filename: CompactString::new("test.ttml"),
             timestamp: 123_456_789,
             track_names: vec![
@@ -95,7 +98,7 @@ mod tests {
         let entry = make_test_entry();
         let item = map_to_lrclib_item(&entry, None);
 
-        assert_eq!(item.id, 9_007_199_254_740_991);
+        assert_eq!(item.id, LyricId::from_u64_masked(LyricId::MAX));
 
         assert_eq!(item.track_name, "Primary Title");
         assert_eq!(item.artist_name, "Taylor Swift");
