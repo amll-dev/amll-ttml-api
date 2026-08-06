@@ -87,6 +87,11 @@ lib.rs 路由 → api/<模块>/extractor.rs → api/<模块>/handler.rs → serv
 中日文匹配依赖 `core/matcher/normalize.rs` 里的 OpenCC 繁简转换（`convert_tw2s`），
 入库时和查询时都会归一化，改动其中一侧必须同步另一侧，否则已有数据会失配。
 
+### 分页机制
+
+- **解析与校验**（`api/shared/pagination.rs`）：由 `Pagination` 结构体处理，`page` 默认 1（从 1 起算），`pageSize` 默认 50，最大上限 100。传入 0、负数、非数字或 `pageSize` 超过 100 时返回 `400 Bad Request`；缺省或空字符串参数使用默认值。
+- **响应数据结构**（`api/shared/dto.rs`）：`SearchData` 响应结果中 `items` 与分页参数解耦，分页元数据统一放在嵌套的 `pagination: PaginationInfo` 结构体中（字段包括 `page`, `pageSize`, `total`, `totalPages`, `hasMore`）。
+
 ### 同步服务
 
 `services/sync_service.rs`，由三处触发：启动时、每 24 小时定时、`POST /v1/webhook/sync`（Bearer `SYNC_SECRET`）。

@@ -8,12 +8,16 @@ use crate::{
             LrclibSongItem,
             map_to_lrclib_item,
         },
-        shared::dto::{
-            ApiResponse,
-            MatchContext,
-            SearchData,
-            SongItem,
-            map_song_to_item,
+        shared::{
+            dto::{
+                ApiResponse,
+                MatchContext,
+                PaginationInfo,
+                SearchData,
+                SongItem,
+                map_song_to_item,
+            },
+            pagination::Pagination,
         },
     },
     core::{
@@ -43,23 +47,49 @@ pub struct LyricService;
 impl LyricService {
     const CONCURRENT_FETCH_LIMIT: usize = 10;
 
+    /// FTS 候选窗口相对页大小的冗余倍数
+    ///
+    /// FTS 命中需要和元数据命中合并并去重，窗口里相当一部分条目会跟元数据重复，
+    /// 保留冗余才能保证合并后仍有足够候选供翻页
+    const FTS_WINDOW_FACTOR: u64 = 3;
+    /// FTS 候选窗口上限，防止深翻页把 SQL LIMIT 撑到不可控
+    const FTS_WINDOW_CAP: u64 = 500;
+
+    /// 按翻页深度动态放大 FTS 候选窗口，并限制到 `FTS_WINDOW_CAP`
+    fn fts_window(pagination: Pagination) -> u64 {
+        pagination
+            .page
+            .saturating_mul(pagination.page_size)
+            .saturating_mul(Self::FTS_WINDOW_FACTOR)
+            .min(Self::FTS_WINDOW_CAP)
+    }
+
     pub async fn search_lyric(
         state: &AppState,
         query: &SearchQuery,
-        limit: usize,
+        pagination: Pagination,
     ) -> ApiResponse<SearchData> {
         let db = state.db.load_full();
         let metadata_hits = db.search_by_fields(query);
 
-        let lyric_hits =
-            Self::fetch_lyric_hits_if_needed(state, query, &metadata_hits, limit).await;
+        let lyric_hits = Self::fetch_lyric_hits_if_needed(
+            state,
+            query,
+            &metadata_hits,
+            pagination.take(),
+            Self::fts_window(pagination),
+        )
+        .await;
 
         let sorted_hits =
             Self::merge_and_sort_hits(&db, metadata_hits, lyric_hits, query.lyric_text.is_some());
 
+        let total = u64::try_from(sorted_hits.len()).unwrap_or(u64::MAX);
+
         let items: Vec<SongItem> = sorted_hits
             .into_iter()
-            .take(limit)
+            .skip(pagination.offset())
+            .take(pagination.take())
             .map(|hit| {
                 let match_context = hit.lyric_hit.and_then(|lyric| {
                     lyric.snippet.map(|snippet| MatchContext {
@@ -73,7 +103,16 @@ impl LyricService {
 
         ApiResponse {
             status: 200,
-            data: SearchData { items },
+            data: SearchData {
+                items,
+                pagination: PaginationInfo {
+                    page: pagination.page,
+                    page_size: pagination.page_size,
+                    total,
+                    total_pages: pagination.total_pages(total),
+                    has_more: pagination.has_more(total),
+                },
+            },
         }
     }
 
@@ -81,7 +120,8 @@ impl LyricService {
         state: &AppState,
         query: &SearchQuery,
         metadata_hits: &[MetadataHit<'_>],
-        limit: usize,
+        page_size: usize,
+        fts_window: u64,
     ) -> Vec<LyricHit> {
         // 计算仅凭元数据搜索的结果是否较弱，如果较低，或者结果较少，我们需要继续匹配歌词正文
         // 如果元数据已经足够精确了，并且用户没有明确要求去查歌词正文，那我们就不用继续匹配正文了
@@ -89,7 +129,7 @@ impl LyricService {
             || metadata_hits
                 .first()
                 .is_none_or(|h| h.score < MatchType::Medium)
-            || metadata_hits.len() < limit;
+            || metadata_hits.len() < page_size;
 
         let fts_keyword = match (&query.lyric_text, &query.global_keyword) {
             (Some(explicit), _) => Some(explicit.clone()),
@@ -98,7 +138,7 @@ impl LyricService {
         };
 
         if let Some(ref kw) = fts_keyword {
-            match state.search_lyrics_fts(kw, limit as u64).await {
+            match state.search_lyrics_fts(kw, fts_window).await {
                 Ok(hits) => hits,
                 Err(e) => {
                     tracing::error!("SQLite FTS5 lyric search failed for keyword '{kw}': {e:?}");
@@ -219,6 +259,9 @@ impl LyricService {
                 })
                 .then_with(|| b.metadata_score.cmp(&a.metadata_score))
                 .then_with(|| b.entry.timestamp.cmp(&a.entry.timestamp))
+                // 候选来自 HashMap，迭代顺序不确定；id 全局唯一，补上它让比较成为
+                // 全序，否则同分同时间戳的条目会在相邻页之间重复或漏掉
+                .then_with(|| a.entry.id.cmp(&b.entry.id))
         });
 
         sorted_hits
@@ -260,14 +303,15 @@ impl LyricService {
     pub async fn lrclib_search(
         state: &AppState,
         query: &SearchQuery,
-        limit: usize,
+        pagination: Pagination,
     ) -> Vec<LrclibSongItem> {
         let db = state.db.load();
 
         let matched_hits = db.search_by_fields(query);
         let entries: Vec<_> = matched_hits
             .into_iter()
-            .take(limit)
+            .skip(pagination.offset())
+            .take(pagination.take())
             .map(|hit| hit.entry.clone())
             .collect();
 

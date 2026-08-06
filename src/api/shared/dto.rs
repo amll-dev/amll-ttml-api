@@ -3,7 +3,7 @@ use serde::Serialize;
 
 use crate::core::models::SongEntry;
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct SongItem {
     pub id: u64,
@@ -32,16 +32,28 @@ pub struct SongItem {
     pub match_context: Option<MatchContext>,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct MatchContext {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub snippet: Option<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PaginationInfo {
+    pub page: u64,
+    pub page_size: u64,
+    pub total: u64,
+    pub total_pages: u64,
+    pub has_more: bool,
+}
+
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
 pub struct SearchData {
     pub items: Vec<SongItem>,
+    pub pagination: PaginationInfo,
 }
 
 #[derive(Serialize)]
@@ -116,5 +128,35 @@ mod tests {
         let json = serde_json::to_value(&item).unwrap();
         assert!(json.get("id").unwrap().is_number());
         assert_eq!(json.get("id").unwrap().as_u64().unwrap(), song.id);
+    }
+
+    #[test]
+    fn search_data_serialization_includes_nested_pagination() {
+        let response = ApiResponse {
+            status: 200,
+            data: SearchData {
+                items: vec![],
+                pagination: PaginationInfo {
+                    page: 1,
+                    page_size: 20,
+                    total: 156,
+                    total_pages: 8,
+                    has_more: true,
+                },
+            },
+        };
+
+        let json = serde_json::to_value(&response).unwrap();
+        assert_eq!(json["status"], 200);
+
+        let data = &json["data"];
+        assert!(data.get("items").unwrap().is_array());
+
+        let pagination = &data["pagination"];
+        assert_eq!(pagination["page"], 1);
+        assert_eq!(pagination["pageSize"], 20);
+        assert_eq!(pagination["total"], 156);
+        assert_eq!(pagination["totalPages"], 8);
+        assert_eq!(pagination["hasMore"], true);
     }
 }

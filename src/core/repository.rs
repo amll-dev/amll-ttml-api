@@ -151,6 +151,9 @@ impl LyricIndexDB {
             b.score
                 .cmp(&a.score)
                 .then_with(|| b.entry.timestamp.cmp(&a.entry.timestamp))
+                // id 全局唯一，兜底保证全序。lrclib_search 直接在这个顺序上翻页，
+                // 少了它同分同时间戳的条目会在相邻页之间重复或漏掉。
+                .then_with(|| a.entry.id.cmp(&b.entry.id))
         });
 
         scored_results
