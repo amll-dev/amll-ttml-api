@@ -65,7 +65,7 @@ cargo build --release
 lib.rs 路由 → api/<模块>/extractor.rs → api/<模块>/handler.rs → services/lyric_service.rs (LyricService<R: LyricStore>) → LyricStore Trait (AppState / MemoryLyricStore)
 ```
 
-- `extractor.rs` 从 `RawQuery` 手工解析查询串（不是 axum 的 `Query` 提取器），负责参数校验与优先级。
+- `extractor.rs` 从 `RawQuery` 解析查询串，由 `api::shared::query`（`NATIVE_SEARCH_DIALECT` / `LRCLIB_SEARCH_DIALECT` / `LRCLIB_GET_DIALECT` 数据表）驱动，负责参数校验、别名映射、`q` 查询降级与分页提取。
   例如 `search` 里同时传 `q` 和具体字段时会丢弃 `q`；`get` 的优先级是 `id` > `filename` > 平台 ID 交集。
 - `handler.rs` 保持极薄，只做「提参 → 调 service → 包 JSON」。
 - `services/lyric_service.rs` 是检索编排的核心，定义了 `LyricService<R = AppState>`，面向深模块 trait `LyricStore`（`services/lyric_store.rs`）编程。
