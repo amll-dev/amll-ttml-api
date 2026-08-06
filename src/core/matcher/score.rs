@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use compact_str::CompactString;
 
 use super::{
@@ -110,28 +112,30 @@ pub fn score_entry(query: &PreparedQuery, entry: &SongEntry) -> MatchType {
 
 /// 纯全局关键词搜索
 fn score_global_keyword(q_norm: &str, entry: &SongEntry) -> MatchType {
-    let mut remainder = q_norm.to_string();
+    let mut remainder = Cow::Borrowed(q_norm);
     let mut artist_found = false;
     let mut album_found = false;
 
     // 先删除歌手
-    for artist in &entry.artist_names {
-        let db_artist = artist.as_str().to_lowercase();
-        if !db_artist.is_empty() && remainder.contains(&db_artist) {
-            remainder = remainder.replace(&db_artist, "").trim().to_string();
+    for db_artist in &entry.normalized_artist_names {
+        let db_artist_str = db_artist.as_str();
+        if !db_artist_str.is_empty() && remainder.contains(db_artist_str) {
+            let new_rem = remainder.replace(db_artist_str, "");
+            remainder = Cow::Owned(new_rem.trim().to_string());
             artist_found = true;
             break;
         }
     }
 
     // 再删除专辑
-    for album in &entry.album_names {
-        let db_album = album.as_str().to_lowercase();
-        if !db_album.is_empty() && remainder.contains(&db_album) {
+    for db_album in &entry.normalized_album_names {
+        let db_album_str = db_album.as_str();
+        if !db_album_str.is_empty() && remainder.contains(db_album_str) {
             // 防止同名主打歌导致剩余字符串变成空串
-            let test_remainder = remainder.replace(&db_album, "").trim().to_string();
-            if !test_remainder.is_empty() {
-                remainder = test_remainder;
+            let test_remainder = remainder.replace(db_album_str, "");
+            let trimmed = test_remainder.trim();
+            if !trimmed.is_empty() {
+                remainder = Cow::Owned(trimmed.to_string());
             }
             album_found = true;
             break;
@@ -141,9 +145,9 @@ fn score_global_keyword(q_norm: &str, entry: &SongEntry) -> MatchType {
     // 最后计分
     let title_score = f64::from(
         entry
-            .track_names
+            .normalized_track_names
             .iter()
-            .map(|name| compare_name(Some(&remainder), Some(&name.to_lowercase())))
+            .map(|name| compare_name(Some(&remainder), Some(name.as_str())))
             .max_by_key(|m| *m as u8)
             .unwrap_or(NameMatchType::NoMatch) as u8,
     );
@@ -151,14 +155,9 @@ fn score_global_keyword(q_norm: &str, entry: &SongEntry) -> MatchType {
     let artist_score = if artist_found {
         f64::from(ArtistMatchType::Perfect as u8)
     } else {
-        let artist_strs: Vec<String> = entry
-            .artist_names
-            .iter()
-            .map(|name| name.as_str().to_lowercase())
-            .collect();
         f64::from(
-            compare_artists(Some(&[q_norm]), Some(&artist_strs)).unwrap_or(ArtistMatchType::NoMatch)
-                as u8,
+            compare_artists(Some(&[q_norm]), Some(&entry.normalized_artist_names))
+                .unwrap_or(ArtistMatchType::NoMatch) as u8,
         )
     };
 
@@ -167,9 +166,9 @@ fn score_global_keyword(q_norm: &str, entry: &SongEntry) -> MatchType {
     } else {
         f64::from(
             entry
-                .album_names
+                .normalized_album_names
                 .iter()
-                .map(|name| compare_name(Some(q_norm), Some(&name.to_lowercase())))
+                .map(|name| compare_name(Some(q_norm), Some(name.as_str())))
                 .max_by_key(|m| *m as u8)
                 .unwrap_or(NameMatchType::NoMatch) as u8,
         )

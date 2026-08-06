@@ -1,15 +1,23 @@
-use std::collections::HashSet;
-
-use super::{
-    normalize::normalize_name_for_comparison,
-    types::{
-        ArtistMatchType,
-        NameMatchType,
-    },
+use super::types::{
+    ArtistMatchType,
+    NameMatchType,
 };
 
 /// 计算两个字符串的归一化 Levenshtein 相似度，并转换为百分比。
 fn compute_text_same(text1: &str, text2: &str) -> f64 {
+    let len1 = text1.chars().count();
+    let len2 = text2.chars().count();
+    if len1 == 0 || len2 == 0 {
+        return 0.0;
+    }
+    let max_len = len1.max(len2) as f64;
+    let min_len = len1.min(len2) as f64;
+
+    // 若理论最大可达到相似度上限低于最低门槛 (55.0)，直接剪枝跳过矩阵分配
+    if (min_len / max_len) * 100.0 < 55.0 {
+        return 0.0;
+    }
+
     strsim::normalized_levenshtein(text1, text2) * 100.0
 }
 
@@ -21,47 +29,47 @@ fn check_dash_paren_equivalence(s_dash: &str, s_paren: &str) -> bool {
         && is_paren
         && let Some((base, suffix)) = s_dash.split_once(" - ")
     {
-        return format!("{} ({})", base.trim(), suffix.trim()) == s_paren;
+        let base = base.trim();
+        let suffix = suffix.trim();
+        if let Some(rest) = s_paren.strip_prefix(base) {
+            let rest = rest.trim_start();
+            if let Some(inner) = rest.strip_prefix('(').and_then(|s| s.strip_suffix(')')) {
+                return inner.trim() == suffix;
+            }
+        }
     }
     false
 }
 
 pub fn compare_name(name1_opt: Option<&str>, name2_opt: Option<&str>) -> NameMatchType {
-    let (Some(name1_norm), Some(name2_norm)) = (name1_opt, name2_opt) else {
+    let (Some(name1), Some(name2)) = (name1_opt, name2_opt) else {
         return NameMatchType::NoMatch;
     };
 
-    if name1_norm.trim() == name2_norm.trim() {
-        return NameMatchType::Perfect;
-    }
-
-    let name1 = normalize_name_for_comparison(name1_norm);
-    let name2 = normalize_name_for_comparison(name2_norm);
     if name1.trim() == name2.trim() {
         return NameMatchType::Perfect;
     }
 
-    if check_dash_paren_equivalence(&name1, &name2) || check_dash_paren_equivalence(&name2, &name1)
-    {
+    if check_dash_paren_equivalence(name1, name2) || check_dash_paren_equivalence(name2, name1) {
         return NameMatchType::VeryHigh;
     }
 
-    let special_suffixes = [
-        "deluxe",
-        "explicit",
-        "special edition",
-        "bonus track",
-        "feat",
-        "with",
+    #[expect(clippy::items_after_statements)]
+    const SPECIAL_SUFFIX_FORMS: &[&str] = &[
+        "(deluxe",
+        "(explicit",
+        "(special edition",
+        "(bonus track",
+        "(feat",
+        "(with",
     ];
-    for suffix in special_suffixes {
-        let suffixed_form = format!("({suffix}");
-        if (name1.contains(&suffixed_form)
-            && !name2.contains(&suffixed_form)
-            && name2 == name1.split(&suffixed_form).next().unwrap_or("").trim())
-            || (name2.contains(&suffixed_form)
-                && !name1.contains(&suffixed_form)
-                && name1 == name2.split(&suffixed_form).next().unwrap_or("").trim())
+    for &suffixed_form in SPECIAL_SUFFIX_FORMS {
+        if (name1.contains(suffixed_form)
+            && !name2.contains(suffixed_form)
+            && name2 == name1.split(suffixed_form).next().unwrap_or("").trim())
+            || (name2.contains(suffixed_form)
+                && !name1.contains(suffixed_form)
+                && name1 == name2.split(suffixed_form).next().unwrap_or("").trim())
         {
             return NameMatchType::VeryHigh;
         }
@@ -100,16 +108,16 @@ pub fn compare_name(name1_opt: Option<&str>, name2_opt: Option<&str>) -> NameMat
         }
     }
 
-    if compute_text_same(&name1, &name2) > 90.0 {
+    if compute_text_same(name1, name2) > 90.0 {
         return NameMatchType::VeryHigh;
     }
-    if compute_text_same(&name1, &name2) > 80.0 {
+    if compute_text_same(name1, name2) > 80.0 {
         return NameMatchType::High;
     }
-    if compute_text_same(&name1, &name2) > 68.0 {
+    if compute_text_same(name1, name2) > 68.0 {
         return NameMatchType::Medium;
     }
-    if compute_text_same(&name1, &name2) > 55.0 {
+    if compute_text_same(name1, name2) > 55.0 {
         return NameMatchType::Low;
     }
 
@@ -131,38 +139,45 @@ pub fn compare_artists<S1: AsRef<str>, S2: AsRef<str>>(
 
     let list1_raw = artists1?;
     let list2_raw = artists2?;
-    if list1_raw.is_empty() || list2_raw.is_empty() {
+
+    let l1_len = list1_raw.iter().filter(|s| !s.as_ref().is_empty()).count();
+    let l2_len = list2_raw.iter().filter(|s| !s.as_ref().is_empty()).count();
+
+    if l1_len == 0 || l2_len == 0 {
         return None;
     }
 
-    let list1: Vec<&str> = list1_raw
+    let is_l1_various = list1_raw
         .iter()
         .map(AsRef::as_ref)
-        .filter(|s| !s.is_empty())
-        .collect();
-    let list2: Vec<&str> = list2_raw
+        .any(|s| !s.is_empty() && (s.contains("various") || s.contains("群星")));
+    let is_l2_various = list2_raw
         .iter()
         .map(AsRef::as_ref)
-        .filter(|s| !s.is_empty())
-        .collect();
+        .any(|s| !s.is_empty() && (s.contains("various") || s.contains("群星")));
 
-    let is_l1_various = list1
-        .iter()
-        .any(|s| s.contains("various") || s.contains("群星"));
-    let is_l2_various = list2
-        .iter()
-        .any(|s| s.contains("various") || s.contains("群星"));
-    if (is_l1_various && (is_l2_various || list2.len() > 4)) || (is_l2_various && list1.len() > 4) {
+    if (is_l1_various && (is_l2_various || l2_len > 4)) || (is_l2_various && l1_len > 4) {
         return Some(ArtistMatchType::High);
     }
 
     let mut intersection_size = 0;
-    let mut matched_indices_in_list2 = HashSet::new();
+    let mut matched_mask: u64 = 0;
 
-    for artist1 in &list1 {
+    for artist1 in list1_raw
+        .iter()
+        .map(AsRef::as_ref)
+        .filter(|s| !s.is_empty())
+    {
         let mut best_match_idx = None;
-        for (i, artist2) in list2.iter().enumerate() {
-            if matched_indices_in_list2.contains(&i) {
+        let mut l2_idx = 0;
+
+        for artist2 in list2_raw
+            .iter()
+            .map(AsRef::as_ref)
+            .filter(|s| !s.is_empty())
+        {
+            if l2_idx < 64 && (matched_mask & (1 << l2_idx)) != 0 {
+                l2_idx += 1;
                 continue;
             }
 
@@ -170,18 +185,21 @@ pub fn compare_artists<S1: AsRef<str>, S2: AsRef<str>>(
                 || artist1.contains(artist2)
                 || compute_text_same(artist1, artist2) > LEVENSHTEIN_THRESHOLD
             {
-                best_match_idx = Some(i);
+                best_match_idx = Some(l2_idx);
                 break;
             }
+            l2_idx += 1;
         }
 
         if let Some(idx) = best_match_idx {
             intersection_size += 1;
-            matched_indices_in_list2.insert(idx);
+            if idx < 64 {
+                matched_mask |= 1 << idx;
+            }
         }
     }
 
-    let union_size = list1.len() + list2.len() - intersection_size;
+    let union_size = l1_len + l2_len - intersection_size;
     if union_size == 0 {
         return Some(ArtistMatchType::Perfect);
     }

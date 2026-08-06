@@ -16,7 +16,10 @@ use crate::{
                 SongItem,
                 map_song_to_item,
             },
-            pagination::{Pagination, paginate},
+            pagination::{
+                Pagination,
+                paginate,
+            },
         },
     },
     core::{

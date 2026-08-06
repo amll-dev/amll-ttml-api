@@ -17,9 +17,9 @@ pub fn convert_tw2s(input: &str) -> String {
     get_opencc().convert(input)
 }
 
-/// 归一化名称字符串
+/// 归一化名称字符串（假设输入已为简体中文或已完成繁简转换预处理）
 pub fn normalize_name_for_comparison(name: &str) -> String {
-    let replaced = convert_tw2s(name)
+    let replaced = name
         .to_lowercase()
         .replace('’', "'")
         .replace('，', ",")
