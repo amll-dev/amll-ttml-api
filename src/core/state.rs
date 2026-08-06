@@ -24,6 +24,7 @@ use crate::{
     core::{
         db::entity,
         error::AppError,
+        matcher::convert_tw2s,
         models::{
             LyricHit,
             LyricIndexDB,
@@ -39,7 +40,6 @@ use crate::{
     },
     utils::{
         highlight::extract_lyric_context,
-        matcher::convert_tw2s,
         ttml::{
             TTMLFormatResult,
             parse_and_format_ttml,

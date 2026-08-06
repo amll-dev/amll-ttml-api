@@ -42,12 +42,10 @@ use crate::{
             self,
             meta,
         },
+        matcher::normalize_name_for_comparison,
         models::RawIndexEntry,
     },
-    utils::{
-        id::generate_file_id,
-        matcher::normalize_name_for_comparison,
-    },
+    utils::id::generate_file_id,
 };
 
 const DB_BASE: &str = "https://raw.githubusercontent.com/amll-dev/amll-ttml-db/main";

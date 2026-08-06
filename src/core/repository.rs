@@ -5,18 +5,18 @@ use std::collections::{
 
 use compact_str::CompactString;
 
-use crate::{
-    core::models::{
-        IdQuery,
-        LyricIndexDB,
-        SearchQuery,
-        SongEntry,
-    },
-    utils::matcher::{
+use crate::core::{
+    matcher::{
         MatchType,
         PreparedQuery,
         rough_match,
         score_entry,
+    },
+    models::{
+        IdQuery,
+        LyricIndexDB,
+        SearchQuery,
+        SongEntry,
     },
 };
 
@@ -161,11 +161,11 @@ impl LyricIndexDB {
 mod tests {
     use super::*;
     use crate::{
-        core::models::SongEntry,
-        utils::{
-            id::generate_file_id,
+        core::{
             matcher::normalize_name_for_comparison,
+            models::SongEntry,
         },
+        utils::id::generate_file_id,
     };
 
     #[allow(clippy::too_many_arguments)]

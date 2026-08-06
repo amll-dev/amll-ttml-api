@@ -75,15 +75,16 @@ lib.rs 路由 → api/<模块>/extractor.rs → api/<模块>/handler.rs → serv
 `LyricService::search_lyric` 把两路结果融合：
 
 1. `LyricIndexDB::search_by_fields` 先粗筛（`rough_match`）再打分（`score_entry`），
-   打分逻辑在 `utils/matcher.rs`：歌名/歌手/专辑加权（1.0 / 1.0 / 0.4），
+   两者都在 `core/matcher/` 下（`rough.rs` / `score.rs`）：歌名/歌手/专辑加权（1.0 / 1.0 / 0.4），
    缺失维度会按比例放大分母，避免只传一个字段时分数被拉低。
    纯 `q` 走 `score_global_keyword`，思路是从关键词里先剥离歌手和专辑，剩余部分当歌名比对。
+   单字段的比对细节在 `core/matcher/compare.rs`，档位枚举在 `types.rs`。
 2. 仅当元数据结果偏弱（为空、首条低于 `Medium`、或数量不足 limit）或用户显式传了 `lyricText` 时，
    才追加 SQLite FTS5 正文检索。
 3. `merge_and_sort_hits` 按优先级桶（元数据强命中 > 元数据+正文 > 主歌词命中 > …）排序，
    同桶内再比 bm25 rank、元数据分、时间戳。
 
-中日文匹配依赖 `utils/matcher.rs` 里的 OpenCC 繁简转换（`convert_tw2s`），
+中日文匹配依赖 `core/matcher/normalize.rs` 里的 OpenCC 繁简转换（`convert_tw2s`），
 入库时和查询时都会归一化，改动其中一侧必须同步另一侧，否则已有数据会失配。
 
 ### 同步服务

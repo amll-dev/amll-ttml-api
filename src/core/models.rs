@@ -3,9 +3,9 @@ use std::collections::HashMap;
 use compact_str::CompactString;
 use serde::Deserialize;
 
-use crate::utils::{
-    id::generate_file_id,
-    matcher::normalize_name_for_comparison,
+use crate::{
+    core::matcher::normalize_name_for_comparison,
+    utils::id::generate_file_id,
 };
 
 #[derive(Deserialize, Debug, Clone)]

@@ -18,6 +18,7 @@ use crate::{
     },
     core::{
         error::AppError,
+        matcher::MatchType,
         models::{
             IdQuery,
             LyricHit,
@@ -29,7 +30,6 @@ use crate::{
         repository::MetadataHit,
         state::AppState,
     },
-    utils::matcher::MatchType,
 };
 
 pub struct SearchHit<'a> {
