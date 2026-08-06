@@ -57,7 +57,7 @@ cargo build --release
    FTS5 建表失败只 warn 不 panic，因此正文检索属于可降级能力。
 
 `AppState`（`core/state.rs`）同时持有两者，并挂了两层 moka 缓存：`ttml_cache`（原始 TTML）和
-`formatted_lyric_cache`（转成 LRC/纯文本的结果），TTL 均为 168 小时。
+`formatted_lyric_cache`（转成 LRC/纯文本的结果），TTL 均为 168 小时。`sync_secret` 在启动时显式解析注入至 `AppState`，供 Webhook 鉴权直接消费。
 
 `LyricId`（`core/lyric_id.rs`）是歌词 ID 的强类型表示，封装 53 位 JavaScript Safe Integer 安全区间 (`0 ..= 0x001F_FFFF_FFFF_FFFF`)，提供边界校验、字符串解析以及由文件名生成哈希 ID 的统一接口。
 
@@ -98,14 +98,14 @@ lib.rs 路由 → api/<模块>/extractor.rs → api/<模块>/handler.rs → serv
 
 ### 同步服务
 
-`services/sync_service.rs`，由三处触发：启动时、每 24 小时定时、`POST /v1/webhook/sync`（Bearer `SYNC_SECRET`）。
+`services/sync_service.rs`，由三处触发：启动时、每 24 小时定时、`POST /v1/webhook/sync`（支持 `Authorization: Bearer SYNC_SECRET` 或 GitHub 原生 `X-Hub-Signature-256` HMAC-SHA256 签名校验）。
 
 策略是先比对上游 `version.json` 的 commit：一致且本地非空则跳过；否则本地为空走全量
 （下载 `raw-lyrics.zip` 到临时文件，`spawn_blocking` 解压解析），本地非空走增量
 （对比 index 差集，并发 20 拉取）。增量待下载数超过 500 或失败时回退全量。
 `AppState::sync_lock` 用 `try_lock` 做去重，并发触发时后来者直接返回而不是排队。
 
-同步完成后重新拉取并整体替换内存索引。
+同步完成后重新拉取并整体替换内存索引，同时清空 `ttml_cache` 与 `formatted_lyric_cache` 缓存。
 
 ### 其他约定
 

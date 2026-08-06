@@ -4,6 +4,7 @@ use std::{
 };
 
 use arc_swap::ArcSwap;
+use compact_str::CompactString;
 use moka::future::Cache;
 use reqwest::Client;
 use sea_orm::{
@@ -58,11 +59,23 @@ pub struct AppState {
     pub formatted_lyric_cache: Cache<String, TTMLFormatResult>,
     pub http_client: Client,
     pub start_time: std::time::Instant,
+    pub sync_secret: Option<CompactString>,
 }
 
 impl AppState {
     #[must_use]
     pub fn new(db_conn: DatabaseConnection) -> Self {
+        let sync_secret = std::env::var("SYNC_SECRET")
+            .ok()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .map(CompactString::from);
+
+        Self::new_with_secret(db_conn, sync_secret.as_deref())
+    }
+
+    #[must_use]
+    pub fn new_with_secret(db_conn: DatabaseConnection, secret: Option<&str>) -> Self {
         let http_client = Client::builder()
             .user_agent("amll-ttml-api/0.1")
             .timeout(Duration::from_secs(30))
@@ -87,6 +100,7 @@ impl AppState {
             formatted_lyric_cache,
             http_client,
             start_time: std::time::Instant::now(),
+            sync_secret: secret.map(CompactString::new),
         }
     }
 
@@ -108,6 +122,8 @@ impl AppState {
                 info!("Sync completed with status: {:?}", res.status);
                 if let Ok(new_db) = fetch_and_parse_db(&self.http_client).await {
                     self.db.store(Arc::new(new_db));
+                    self.ttml_cache.invalidate_all();
+                    self.formatted_lyric_cache.invalidate_all();
                 }
                 Ok(())
             }

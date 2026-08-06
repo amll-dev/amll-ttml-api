@@ -18,8 +18,11 @@ ferrous-opencc = { version = "0.4.0", default-features = false, features = [
     "t2s-conversion",
 ] }
 futures = "0.3.33"
+hex = "0.4"
+hmac = "0.13"
 moka = { version = "0.12", features = ["future"] }
 reqwest = { version = "0.13", features = ["json", "default-tls"] }
+sha2 = "0.11"
 sea-orm = { version = "2.0.0", features = [
     "runtime-tokio-rustls",
     "sqlx-sqlite",
