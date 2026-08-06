@@ -4,7 +4,8 @@
 
 ## API 接口
 
-详细接口文档请参阅 [api.md](./api.md)。
+详细接口文档请参阅 <https://amll.dev/reference/http-api/overview>，
+OpenAPI 规范见 <https://amll.dev/api/ttml/openapi.yaml>。
 
 ## 开发与运行
 
