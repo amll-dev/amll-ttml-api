@@ -93,7 +93,6 @@ mod tests {
     }
 
     #[test]
-    #[expect(clippy::float_cmp)]
     fn test_map_to_lrclib_item_basic() {
         let entry = make_test_entry();
         let item = map_to_lrclib_item(&entry, None);

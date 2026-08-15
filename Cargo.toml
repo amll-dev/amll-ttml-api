@@ -62,3 +62,5 @@ missing_errors_doc = "allow"
 
 cast_precision_loss = "allow"
 cast_possible_truncation = "allow"
+
+assert_is_empty = "allow"
