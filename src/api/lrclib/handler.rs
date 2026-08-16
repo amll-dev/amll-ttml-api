@@ -22,9 +22,11 @@ use crate::{
     core::{
         LyricId,
         error::AppError,
-        state::AppState,
     },
-    services::lyric_service,
+    services::{
+        AppState,
+        lyric_service,
+    },
 };
 
 pub async fn handle_search(
@@ -32,7 +34,7 @@ pub async fn handle_search(
     RawQuery(raw_query): RawQuery,
 ) -> Result<impl IntoResponse, AppError> {
     let (query, pagination) = extract_lrclib_search_query(raw_query.as_deref().unwrap_or(""))?;
-    let hits = lyric_service::lrclib_search(&state, &query, pagination).await;
+    let hits = lyric_service::lrclib_search(&state.store, &query, pagination).await;
 
     let items: Vec<LrclibSongItem> = hits
         .into_iter()
@@ -47,7 +49,7 @@ pub async fn handle_get(
     RawQuery(raw_query): RawQuery,
 ) -> Result<impl IntoResponse, AppError> {
     let query = extract_lrclib_get_query(raw_query.as_deref().unwrap_or(""))?;
-    let (entry, formatted) = lyric_service::lrclib_get_by_fields(&state, query).await?;
+    let (entry, formatted) = lyric_service::lrclib_get_by_fields(&state.store, query).await?;
 
     Ok(Json(map_to_lrclib_item(&entry, Some(&formatted))))
 }
@@ -57,6 +59,6 @@ pub async fn handle_get_by_id(
     Path(id): Path<u64>,
 ) -> Result<impl IntoResponse, AppError> {
     let lyric_id = LyricId::from_u64(id)?;
-    let (entry, formatted) = lyric_service::lrclib_get_by_id(&state, lyric_id).await?;
+    let (entry, formatted) = lyric_service::lrclib_get_by_id(&state.store, lyric_id).await?;
     Ok(Json(map_to_lrclib_item(&entry, Some(&formatted))))
 }

@@ -5,7 +5,7 @@ use axum::{
 };
 use serde::Serialize;
 
-use crate::core::state::AppState;
+use crate::services::AppState;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -34,7 +34,7 @@ pub struct StatusResponse {
 
 pub async fn handle_status(State(state): State<AppState>) -> impl IntoResponse {
     let uptime_seconds = state.start_time.elapsed().as_secs();
-    let lyric_count = state.lyric_count();
+    let lyric_count = state.store.lyric_count();
 
     let response = StatusResponse {
         status: "ok",

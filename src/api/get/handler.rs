@@ -14,11 +14,11 @@ use crate::{
             map_song_to_item,
         },
     },
-    core::{
-        error::AppError,
-        state::AppState,
+    core::error::AppError,
+    services::{
+        AppState,
+        lyric_service,
     },
-    services::lyric_service,
 };
 
 pub async fn handle_get(
@@ -27,7 +27,7 @@ pub async fn handle_get(
 ) -> Result<impl IntoResponse, AppError> {
     let get_query = extract_get_query(raw_query.as_deref().unwrap_or(""))?;
 
-    let (entry, ttml_text) = lyric_service::get_lyric(&state, get_query.id_query).await?;
+    let (entry, ttml_text) = lyric_service::get_lyric(&state.store, get_query.id_query).await?;
 
     Ok(ApiSuccess(map_song_to_item(
         &entry,

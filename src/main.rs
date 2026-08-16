@@ -64,7 +64,7 @@ async fn main() -> Result<()> {
 
     let state_clone = state.clone();
     tokio::spawn(async move {
-        if let Err(e) = state_clone.update_db().await {
+        if let Err(e) = state_clone.syncer.sync().await {
             error!("Initial DB fetch/sync failed: {e:?}");
         }
     });
@@ -77,7 +77,7 @@ async fn main() -> Result<()> {
         loop {
             interval.tick().await;
             info!("Periodic DB update triggered (daily fallback)");
-            if let Err(e) = state_periodic.update_db().await {
+            if let Err(e) = state_periodic.syncer.sync().await {
                 error!("Periodic DB update failed: {e:?}");
             }
         }

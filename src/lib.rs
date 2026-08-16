@@ -1,7 +1,4 @@
-pub use core::{
-    db::setup::init_db,
-    state::AppState,
-};
+pub use core::db::setup::init_db;
 use std::time::Duration;
 
 use axum::{
@@ -24,6 +21,7 @@ use tracing::{
     info,
 };
 
+pub use crate::services::AppState;
 use crate::{
     core::error::AppError,
     utils::cors::create_cors_layer,

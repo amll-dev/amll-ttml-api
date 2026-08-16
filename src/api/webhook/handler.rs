@@ -16,9 +16,9 @@ use serde_json::{
 use sha2::Sha256;
 use tracing::info;
 
-use crate::core::{
-    error::AppError,
-    state::AppState,
+use crate::{
+    core::error::AppError,
+    services::AppState,
 };
 
 type HmacSha256 = Hmac<Sha256>;
@@ -64,7 +64,7 @@ pub async fn handle_webhook_sync(
     }
     let state_clone = state;
     tokio::spawn(async move {
-        if let Err(e) = state_clone.update_db().await {
+        if let Err(e) = state_clone.syncer.sync().await {
             tracing::error!("Webhook triggered sync failed: {e:?}");
         }
     });
@@ -117,11 +117,9 @@ mod tests {
 
     use super::handle_webhook_sync;
     use crate::{
-        core::{
-            error::AppError,
-            state::AppState,
-        },
+        core::error::AppError,
         init_db,
+        services::AppState,
     };
 
     fn compute_github_signature(secret: &str, body: &[u8]) -> String {

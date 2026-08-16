@@ -1,3 +1,14 @@
+//! 歌词业务层，负责五个数据端点背后的业务操作
+//!
+//! - `search_lyric` —> `/lyrics/search`：元数据模糊匹配与歌词正文 FTS 检索，两路命中合并排序后分页
+//! - `get_lyric` —> `/lyrics/get`：按 53 位 ID、文件名或平台 ID 定位歌曲，返回条目与歌词原文
+//! - `lrclib_search` —> `/lrclib/search`：LRCLIB 兼容搜索，逐条附带解析后的歌词
+//! - `lrclib_get_by_fields` / `lrclib_get_by_id` -> `/lrclib/get`：按字段组合或 ID
+//!   取单条并附带解析后的歌词
+//!
+//! 本层只产出领域数据（歌曲条目与歌词内容），分页也在此完成；
+//! JSON DTO 的映射与响应包装由 api 层的 handler 负责
+
 use futures::StreamExt;
 
 use crate::{

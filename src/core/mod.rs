@@ -5,7 +5,6 @@ pub mod matcher;
 pub mod models;
 pub mod pagination;
 pub mod repository;
-pub mod state;
 
 pub use lyric_id::LyricId;
 
