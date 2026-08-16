@@ -62,6 +62,16 @@ async fn main() -> Result<()> {
 
     let state = AppState::new(db_conn);
 
+    // 启动时从本地数据库建立内存索引，搜索立即可用
+    // 如果本地没有数据库，需要等待 `LyricSyncer.sync` 的第一次同步
+    if let Err(e) = state.store.rebuild_index().await {
+        error!("Startup index rebuild failed, serving with empty index until first sync: {e:?}");
+    }
+    info!(
+        "In-memory index ready with {} entries",
+        state.store.lyric_count()
+    );
+
     let state_clone = state.clone();
     tokio::spawn(async move {
         if let Err(e) = state_clone.syncer.sync().await {

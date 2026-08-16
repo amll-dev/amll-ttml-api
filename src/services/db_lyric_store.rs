@@ -13,6 +13,7 @@ use sea_orm::DatabaseConnection;
 use crate::{
     core::{
         db::queries::{
+            fetch_song_entries,
             find_raw_ttml,
             search_fts,
         },
@@ -22,10 +23,7 @@ use crate::{
             LyricIndexDB,
         },
     },
-    services::{
-        LyricStore,
-        github_fetcher::fetch_raw_lyric,
-    },
+    services::LyricStore,
     utils::ttml::{
         TTMLFormatResult,
         parse_and_format_ttml,
@@ -87,6 +85,20 @@ impl DbLyricStore {
         self.formatted_lyric_cache.invalidate_all();
     }
 
+    /// 从 SQLite 重建内存索引并原子换入，索引是 SQLite 的派生缓存视图
+    ///
+    /// # Errors
+    ///
+    /// 查询或组装失败时返回错误，旧索引保持不变
+    pub async fn rebuild_index(&self) -> Result<(), AppError> {
+        let entries = fetch_song_entries(&self.conn).await?;
+        let index = tokio::task::spawn_blocking(move || LyricIndexDB::from_entries(entries))
+            .await
+            .map_err(|e| AppError::InternalServerError(format!("Index assembly failed: {e}")))?;
+        self.swap_index(index);
+        Ok(())
+    }
+
     /// 根据文件名获取 TTML 文件内容
     ///
     /// 获取顺序是 缓存 -> 本地数据库 -> GitHub 获取兜底
@@ -135,6 +147,25 @@ impl DbLyricStore {
     }
 }
 
+/// 从 GitHub 根据指定文件名下载歌词内容
+///
+/// 只有在缓存和本地数据库都不存在时才应使用
+async fn fetch_raw_lyric(client: &Client, filename: &str) -> Result<String, AppError> {
+    let ttml_url = format!(
+        "https://raw.githubusercontent.com/amll-dev/amll-ttml-db/main/raw-lyrics/{filename}"
+    );
+
+    let res = client.get(&ttml_url).send().await?;
+    if !res.status().is_success() {
+        return Err(AppError::UpstreamError(
+            "Failed to fetch lyric file from GitHub".into(),
+        ));
+    }
+
+    let text = res.text().await?;
+    Ok(text)
+}
+
 #[allow(clippy::unused_async_trait_impl)]
 impl LyricStore for DbLyricStore {
     async fn fetch_lyric_ttml(&self, filename: &str) -> Result<String, AppError> {
@@ -155,5 +186,71 @@ impl LyricStore for DbLyricStore {
 
     async fn load_index(&self) -> Arc<LyricIndexDB> {
         self.index.load_full()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use sea_orm::{
+        EntityTrait,
+        Set,
+    };
+    use serde_json::{
+        Value,
+        json,
+    };
+
+    use super::*;
+    use crate::core::{
+        LyricId,
+        db::{
+            entity,
+            setup::init_db,
+        },
+        models::IdQuery,
+    };
+
+    #[tokio::test]
+    async fn rebuild_index_makes_sqlite_rows_queryable() {
+        let conn = init_db("sqlite::memory:").await.expect("init db");
+
+        let empty: Value = json!([]);
+        entity::Entity::insert(entity::ActiveModel {
+            id: Set(LyricId::from_filename("one.ttml").get().cast_signed()),
+            filename: Set("one.ttml".to_string()),
+            timestamp: Set(1),
+            track_names: Set(json!(["Test Song One"])),
+            artist_names: Set(json!(["Artist Alpha"])),
+            album_names: Set(empty.clone()),
+            normalized_track_names: Set(json!(["test song one"])),
+            normalized_artist_names: Set(json!(["artist alpha"])),
+            normalized_album_names: Set(empty.clone()),
+            ncm_music_ids: Set(empty.clone()),
+            qq_music_ids: Set(empty.clone()),
+            apple_music_ids: Set(empty.clone()),
+            spotify_ids: Set(json!(["sp1001"])),
+            isrcs: Set(empty.clone()),
+            author_ids: Set(empty.clone()),
+            author_usernames: Set(empty),
+            lyric_text: Set(String::new()),
+            bg_vocal_text: Set(String::new()),
+            raw_ttml: Set(String::new()),
+        })
+        .exec(&conn)
+        .await
+        .expect("seed row");
+
+        let store = DbLyricStore::new(conn);
+        store.rebuild_index().await.expect("rebuild index");
+
+        let index = store.index.load_full();
+        assert_eq!(index.entries.len(), 1);
+        assert_eq!(index.entries[0].filename.as_str(), "one.ttml");
+
+        let hits = index.find_by_ids(&IdQuery {
+            spotify_ids: vec!["sp1001".to_string()],
+            ..Default::default()
+        });
+        assert_eq!(hits, vec![0]);
     }
 }

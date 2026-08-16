@@ -3,10 +3,7 @@ use std::collections::HashMap;
 use compact_str::CompactString;
 use serde::Deserialize;
 
-use crate::core::{
-    LyricId,
-    matcher::normalize_name_for_comparison,
-};
+use crate::core::LyricId;
 
 #[derive(Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -40,89 +37,6 @@ pub struct SongEntry {
     pub author_usernames: Box<[CompactString]>,
 }
 
-impl From<RawIndexEntry> for SongEntry {
-    fn from(raw: RawIndexEntry) -> Self {
-        // 格式: 时间戳-作者ID-随机字符串.ttml
-        // 示例: 1768754400682-250306205-r6IrpmBd.ttml
-        let timestamp = raw
-            .raw_lyric_file
-            .split('-')
-            .next()
-            .and_then(|ts_str| ts_str.parse::<u64>().ok())
-            .unwrap_or(0);
-
-        let id = LyricId::from_filename(&raw.raw_lyric_file);
-
-        let mut song = Self {
-            id,
-            filename: CompactString::new(&raw.raw_lyric_file),
-            timestamp,
-
-            track_names: Box::default(),
-            artist_names: Box::default(),
-            album_names: Box::default(),
-
-            normalized_track_names: Box::default(),
-            normalized_artist_names: Box::default(),
-            normalized_album_names: Box::default(),
-
-            ncm_music_ids: Box::default(),
-            qq_music_ids: Box::default(),
-            apple_music_ids: Box::default(),
-            spotify_ids: Box::default(),
-
-            isrcs: Box::default(),
-
-            author_ids: Box::default(),
-            author_usernames: Box::default(),
-        };
-
-        for (key, values) in raw.metadata {
-            let compact_values: Box<[CompactString]> =
-                values.into_iter().map(CompactString::from).collect();
-
-            match key.as_str() {
-                "musicName" => song.track_names = compact_values,
-                "artists" => song.artist_names = compact_values,
-                "album" => song.album_names = compact_values,
-
-                "ncmMusicId" => song.ncm_music_ids = compact_values,
-                "qqMusicId" => song.qq_music_ids = compact_values,
-                "appleMusicId" => song.apple_music_ids = compact_values,
-                "spotifyId" => song.spotify_ids = compact_values,
-
-                "isrc" => song.isrcs = compact_values,
-
-                "ttmlAuthorGithub" => song.author_ids = compact_values,
-                "ttmlAuthorGithubLogin" => song.author_usernames = compact_values,
-                _ => {}
-            }
-        }
-
-        let norm_tracks: Vec<CompactString> = song
-            .track_names
-            .iter()
-            .map(|s| CompactString::from(normalize_name_for_comparison(s)))
-            .collect();
-        let norm_artists: Vec<CompactString> = song
-            .artist_names
-            .iter()
-            .map(|s| CompactString::from(normalize_name_for_comparison(s)))
-            .collect();
-        let norm_albums: Vec<CompactString> = song
-            .album_names
-            .iter()
-            .map(|s| CompactString::from(normalize_name_for_comparison(s)))
-            .collect();
-
-        song.normalized_track_names = norm_tracks.into_boxed_slice();
-        song.normalized_artist_names = norm_artists.into_boxed_slice();
-        song.normalized_album_names = norm_albums.into_boxed_slice();
-
-        song
-    }
-}
-
 #[derive(Default)]
 pub struct LyricIndexDB {
     pub entries: Vec<SongEntry>,
@@ -137,6 +51,52 @@ pub struct LyricIndexDB {
 
     pub author_id_idx: HashMap<CompactString, Vec<usize>>,
     pub author_username_idx: HashMap<CompactString, Vec<usize>>,
+}
+
+impl LyricIndexDB {
+    /// 由条目列表组装全部倒排索引
+    #[must_use]
+    pub fn from_entries(entries: Vec<SongEntry>) -> Self {
+        let mut index = Self {
+            entries: Vec::with_capacity(entries.len()),
+            ..Self::default()
+        };
+
+        for song in entries {
+            let i = index.entries.len();
+            index.id_idx.insert(song.id, i);
+
+            for id in &song.ncm_music_ids {
+                index.ncm_idx.entry(id.clone()).or_default().push(i);
+            }
+            for id in &song.qq_music_ids {
+                index.qq_idx.entry(id.clone()).or_default().push(i);
+            }
+            for id in &song.apple_music_ids {
+                index.apple_idx.entry(id.clone()).or_default().push(i);
+            }
+            for id in &song.spotify_ids {
+                index.spotify_idx.entry(id.clone()).or_default().push(i);
+            }
+            for id in &song.isrcs {
+                index.isrc_idx.entry(id.clone()).or_default().push(i);
+            }
+            for id in &song.author_ids {
+                index.author_id_idx.entry(id.clone()).or_default().push(i);
+            }
+            for id in &song.author_usernames {
+                index
+                    .author_username_idx
+                    .entry(id.clone())
+                    .or_default()
+                    .push(i);
+            }
+
+            index.entries.push(song);
+        }
+
+        index
+    }
 }
 
 #[derive(Default)]
@@ -184,4 +144,62 @@ pub struct LyricHit {
 pub struct LyricSearchResult {
     pub entry: SongEntry,
     pub lyric_hit: Option<LyricHit>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::test_utils::make_song;
+
+    #[test]
+    fn from_entries_empty() {
+        let index = LyricIndexDB::from_entries(Vec::new());
+        assert!(index.entries.is_empty());
+        assert!(index.id_idx.is_empty());
+        assert!(index.spotify_idx.is_empty());
+    }
+
+    #[test]
+    fn from_entries_builds_platform_indices() {
+        let index = LyricIndexDB::from_entries(vec![
+            make_song(
+                "a.ttml",
+                1,
+                &["Song A"],
+                &["Artist X"],
+                &["111"],
+                &["sp1"],
+                &[],
+                &[],
+            ),
+            make_song(
+                "b.ttml",
+                2,
+                &["Song B"],
+                &["Artist Y"],
+                &[],
+                &["sp1"],
+                &[],
+                &[],
+            ),
+        ]);
+
+        let mut spotify_hits = index.spotify_idx.get("sp1").cloned().unwrap_or_default();
+        spotify_hits.sort_unstable();
+        assert_eq!(spotify_hits, vec![0, 1]);
+
+        assert_eq!(index.ncm_idx.get("111").cloned(), Some(vec![0]));
+        assert_eq!(index.entries.len(), 2);
+    }
+
+    #[test]
+    fn from_entries_id_collision_last_wins() {
+        let a = make_song("a.ttml", 1, &["Song A"], &["Artist X"], &[], &[], &[], &[]);
+        let mut b = make_song("b.ttml", 2, &["Song B"], &["Artist Y"], &[], &[], &[], &[]);
+        b.id = a.id;
+        let colliding_id = b.id;
+
+        let index = LyricIndexDB::from_entries(vec![a, b]);
+        assert_eq!(index.id_idx.get(&colliding_id), Some(&1));
+    }
 }

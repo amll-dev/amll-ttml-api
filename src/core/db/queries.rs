@@ -1,19 +1,23 @@
 //! SQLite 查询层
 //!
-//! 负责 FTS 全文检索和从数据库中读取原始 TTML 文件
+//! 负责 FTS 全文检索、读取原始 TTML 文件、读取重建内存索引所需的元数据条目
 //!
 //! 查询与 `setup.rs` 中的 FTS DDL（列序、trigram tokenizer、同步触发器）必须保持同步，
 //! 修改任何一边必须要同步另一边
 
+use compact_str::CompactString;
 use sea_orm::{
     ColumnTrait,
     ConnectionTrait,
     DatabaseBackend,
     DatabaseConnection,
     EntityTrait,
+    FromQueryResult,
     QueryFilter,
+    QuerySelect,
     Statement,
 };
+use serde_json::Value;
 
 use crate::{
     core::{
@@ -24,6 +28,7 @@ use crate::{
         models::{
             LyricHit,
             LyricMatchField,
+            SongEntry,
         },
     },
     utils::highlight::extract_lyric_context,
@@ -41,6 +46,90 @@ pub async fn find_raw_ttml(conn: &DatabaseConnection, filename: &str) -> Option<
 
     let ttml = row.raw_ttml;
     (!ttml.is_empty()).then_some(ttml)
+}
+
+/// 读取全部条目的元数据，用于重建内存索引
+///
+/// 只投影元数据列，`raw_ttml`、`lyric_text`、`bg_vocal_text` 不进行重建，避免短时大量内存开销
+pub async fn fetch_song_entries(conn: &DatabaseConnection) -> Result<Vec<SongEntry>, AppError> {
+    let rows = entity::Entity::find()
+        .select_only()
+        .columns([
+            entity::Column::Id,
+            entity::Column::Filename,
+            entity::Column::Timestamp,
+            entity::Column::TrackNames,
+            entity::Column::ArtistNames,
+            entity::Column::AlbumNames,
+            entity::Column::NormalizedTrackNames,
+            entity::Column::NormalizedArtistNames,
+            entity::Column::NormalizedAlbumNames,
+            entity::Column::NcmMusicIds,
+            entity::Column::QqMusicIds,
+            entity::Column::AppleMusicIds,
+            entity::Column::SpotifyIds,
+            entity::Column::Isrcs,
+            entity::Column::AuthorIds,
+            entity::Column::AuthorUsernames,
+        ])
+        .into_model::<MetadataRow>()
+        .all(conn)
+        .await
+        .map_err(|e| AppError::InternalServerError(format!("Failed to load entries: {e}")))?;
+
+    Ok(rows.into_iter().map(SongEntry::from).collect())
+}
+
+/// [`fetch_song_entries`] 的投影行形状，字段名与列名一致
+#[derive(FromQueryResult)]
+struct MetadataRow {
+    id: i64,
+    filename: String,
+    timestamp: i64,
+    track_names: Value,
+    artist_names: Value,
+    album_names: Value,
+    normalized_track_names: Value,
+    normalized_artist_names: Value,
+    normalized_album_names: Value,
+    ncm_music_ids: Value,
+    qq_music_ids: Value,
+    apple_music_ids: Value,
+    spotify_ids: Value,
+    isrcs: Value,
+    author_ids: Value,
+    author_usernames: Value,
+}
+
+impl From<MetadataRow> for SongEntry {
+    fn from(row: MetadataRow) -> Self {
+        Self {
+            id: LyricId::from_u64_masked(row.id.cast_unsigned()),
+            filename: CompactString::new(row.filename),
+            timestamp: row.timestamp.cast_unsigned(),
+            track_names: json_to_compact_box(row.track_names),
+            artist_names: json_to_compact_box(row.artist_names),
+            album_names: json_to_compact_box(row.album_names),
+            normalized_track_names: json_to_compact_box(row.normalized_track_names),
+            normalized_artist_names: json_to_compact_box(row.normalized_artist_names),
+            normalized_album_names: json_to_compact_box(row.normalized_album_names),
+            ncm_music_ids: json_to_compact_box(row.ncm_music_ids),
+            qq_music_ids: json_to_compact_box(row.qq_music_ids),
+            apple_music_ids: json_to_compact_box(row.apple_music_ids),
+            spotify_ids: json_to_compact_box(row.spotify_ids),
+            isrcs: json_to_compact_box(row.isrcs),
+            author_ids: json_to_compact_box(row.author_ids),
+            author_usernames: json_to_compact_box(row.author_usernames),
+        }
+    }
+}
+
+fn json_to_compact_box(value: Value) -> Box<[CompactString]> {
+    serde_json::from_value::<Vec<String>>(value)
+        .unwrap_or_default()
+        .into_iter()
+        .map(CompactString::from)
+        .collect()
 }
 
 /// FTS5 全文检索歌词正文，返回按 bm25 相关度排序的命中
@@ -262,5 +351,40 @@ mod tests {
             .expect("seed blank row");
         let blank = find_raw_ttml(&conn, "blank.ttml").await;
         assert_eq!(blank, None);
+    }
+
+    #[tokio::test]
+    async fn fetch_song_entries_round_trips_metadata() {
+        let conn = init_db("sqlite::memory:").await.expect("init db");
+
+        let mut row = seed_row("meta.ttml", "lyric", "bg", "<tt/>");
+        row.track_names = Set(json!(["Test Song One"]));
+        row.artist_names = Set(json!(["Artist Alpha"]));
+        row.normalized_track_names = Set(json!(["test song one"]));
+        row.spotify_ids = Set(json!(["sp1001"]));
+        row.timestamp = Set(1_600_000_000);
+        entity::Entity::insert(row)
+            .exec(&conn)
+            .await
+            .expect("seed row");
+
+        let entries = fetch_song_entries(&conn).await.expect("fetch entries");
+        assert_eq!(entries.len(), 1);
+
+        let entry = &entries[0];
+        assert_eq!(entry.id, LyricId::from_filename("meta.ttml"));
+        assert_eq!(entry.filename.as_str(), "meta.ttml");
+        assert_eq!(entry.timestamp, 1_600_000_000);
+        assert_eq!(entry.track_names[0].as_str(), "Test Song One");
+        assert_eq!(entry.artist_names[0].as_str(), "Artist Alpha");
+        assert_eq!(entry.normalized_track_names[0].as_str(), "test song one");
+        assert_eq!(entry.spotify_ids[0].as_str(), "sp1001");
+    }
+
+    #[tokio::test]
+    async fn fetch_song_entries_empty_table() {
+        let conn = init_db("sqlite::memory:").await.expect("init db");
+        let entries = fetch_song_entries(&conn).await.expect("fetch entries");
+        assert!(entries.is_empty());
     }
 }

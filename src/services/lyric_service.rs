@@ -225,10 +225,7 @@ mod tests {
                 LyricIndexDB,
                 LyricMatchField,
             },
-            test_utils::{
-                build_test_db,
-                make_song,
-            },
+            test_utils::make_song,
         },
         utils::ttml::parse_and_format_ttml,
     };
@@ -304,7 +301,7 @@ mod tests {
         );
         let id2 = entry2.id;
 
-        let db = build_test_db(vec![entry1, entry2]);
+        let db = LyricIndexDB::from_entries(vec![entry1, entry2]);
         let mut ttml_map = HashMap::new();
         ttml_map.insert("test_song_one.ttml".to_string(), sample_ttml());
         ttml_map.insert("test_song_two.ttml".to_string(), sample_ttml());

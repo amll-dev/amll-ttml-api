@@ -1,5 +1,8 @@
 use std::{
-    collections::HashSet,
+    collections::{
+        HashMap,
+        HashSet,
+    },
     io::{
         Read,
         Seek,
@@ -123,16 +126,30 @@ impl SyncService {
         let local_files = self.get_all_local_filenames().await?;
         info!("Local DB contains {} entries", local_files.len());
 
+        let index_map = self.fetch_remote_index_map().await?;
+        let remote_files: HashSet<String> = index_map.keys().cloned().collect();
+        let to_download: Vec<String> = remote_files.difference(&local_files).cloned().collect();
+
+        info!(
+            "Remote files: {}, Local files: {}, To download: {}",
+            remote_files.len(),
+            local_files.len(),
+            to_download.len()
+        );
+
         let result = if local_files.is_empty() {
             info!("No local data, performing full sync...");
-            self.perform_full_sync(&local_files).await?
+            self.perform_full_sync(&index_map, &to_download).await?
         } else {
             info!("Attempting incremental sync...");
-            match self.perform_incremental_sync(&local_files).await {
+            match self
+                .perform_incremental_sync(&index_map, &to_download)
+                .await
+            {
                 Ok(res) => res,
                 Err(e) => {
                     warn!("Incremental sync failed: {e:?}, falling back to full sync");
-                    self.perform_full_sync(&local_files).await?
+                    self.perform_full_sync(&index_map, &to_download).await?
                 }
             }
         };
@@ -155,6 +172,34 @@ impl SyncService {
         }
         let v = resp.json::<RemoteVersion>().await?;
         Ok(v)
+    }
+
+    async fn fetch_remote_index_map(&self) -> Result<HashMap<String, RawIndexEntry>> {
+        let url = format!("{DB_BASE}/metadata/raw-lyrics-index.jsonl");
+        info!("Downloading index from: {url}");
+
+        let resp = self.client.get(&url).send().await?;
+        if !resp.status().is_success() {
+            anyhow::bail!("HTTP error downloading index: {}", resp.status());
+        }
+
+        let text = resp.text().await?;
+        let mut map = HashMap::new();
+        for line in text.lines() {
+            let line = line.trim();
+            if line.is_empty() {
+                continue;
+            }
+            match serde_json::from_str::<RawIndexEntry>(line) {
+                Ok(entry) => {
+                    map.insert(entry.raw_lyric_file.clone(), entry);
+                }
+                Err(err) => {
+                    warn!("Failed to parse JSONL line from remote index: {err}, line: {line}");
+                }
+            }
+        }
+        Ok(map)
     }
 
     async fn get_local_commit(&self) -> Result<Option<String>> {
@@ -195,7 +240,11 @@ impl SyncService {
         Ok(filenames.into_iter().collect())
     }
 
-    async fn perform_full_sync(&self, local_files: &HashSet<String>) -> Result<SyncResult> {
+    async fn perform_full_sync(
+        &self,
+        index_map: &HashMap<String, RawIndexEntry>,
+        to_download: &[String],
+    ) -> Result<SyncResult> {
         let url = format!("{DB_BASE}/raw-lyrics/raw-lyrics.zip");
         info!("Downloading full lyrics archive from: {url}");
 
@@ -249,7 +298,17 @@ impl SyncService {
         .await??;
 
         let total_parsed = parsed_entries.len();
-        let new_entries = filter_new_entries(parsed_entries, local_files);
+        let to_download_set: HashSet<&str> = to_download.iter().map(String::as_str).collect();
+        let mut new_entries: Vec<entity::Model> = parsed_entries
+            .into_iter()
+            .filter(|m| to_download_set.contains(m.filename.as_str()))
+            .collect();
+
+        for model in &mut new_entries {
+            if let Some(raw) = index_map.get(model.filename.as_str()) {
+                merge_raw_index_entry(model, raw.clone());
+            }
+        }
 
         info!(
             "Parsed {} entries from zip archive. Found {} new entries to insert into SQLite...",
@@ -276,38 +335,11 @@ impl SyncService {
         })
     }
 
-    async fn perform_incremental_sync(&self, local_files: &HashSet<String>) -> Result<SyncResult> {
-        let url = format!("{DB_BASE}/metadata/raw-lyrics-index.jsonl");
-        info!("Downloading index from: {url}");
-
-        let resp = self.client.get(&url).send().await?;
-        if !resp.status().is_success() {
-            anyhow::bail!("HTTP error downloading index: {}", resp.status());
-        }
-
-        let text = resp.text().await?;
-        let mut remote_entries_map = std::collections::HashMap::new();
-
-        for line in text.lines() {
-            let line = line.trim();
-            if line.is_empty() {
-                continue;
-            }
-            if let Ok(raw_entry) = serde_json::from_str::<RawIndexEntry>(line) {
-                remote_entries_map.insert(raw_entry.raw_lyric_file.clone(), raw_entry);
-            }
-        }
-
-        let remote_files: HashSet<String> = remote_entries_map.keys().cloned().collect();
-        let to_download: Vec<String> = remote_files.difference(local_files).cloned().collect();
-
-        info!(
-            "Remote files: {}, Local files: {}, To download: {}",
-            remote_files.len(),
-            local_files.len(),
-            to_download.len()
-        );
-
+    async fn perform_incremental_sync(
+        &self,
+        index_map: &HashMap<String, RawIndexEntry>,
+        to_download: &[String],
+    ) -> Result<SyncResult> {
         if to_download.len() > INCREMENTAL_THRESHOLD {
             info!(
                 "Too many files to download ({}), fallback to full sync",
@@ -327,10 +359,10 @@ impl SyncService {
         }
 
         let client = self.client.clone();
-        let fetched_models: Vec<entity::Model> = stream::iter(to_download)
+        let fetched_models: Vec<entity::Model> = stream::iter(to_download.iter().cloned())
             .map(|filename| {
                 let client = client.clone();
-                let raw_entry_opt = remote_entries_map.get(&filename).cloned();
+                let raw_entry_opt = index_map.get(&filename).cloned();
 
                 async move {
                     let url = format!("{DB_BASE}/raw-lyrics/{filename}");
@@ -402,16 +434,6 @@ impl SyncService {
         }
         Ok(())
     }
-}
-
-pub fn filter_new_entries(
-    models: Vec<entity::Model>,
-    local_files: &HashSet<String>,
-) -> Vec<entity::Model> {
-    models
-        .into_iter()
-        .filter(|m| !local_files.contains(&m.filename))
-        .collect()
 }
 
 pub fn build_entity_from_ttml(

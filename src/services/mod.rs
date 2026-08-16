@@ -1,6 +1,5 @@
 pub mod app_state;
 pub mod db_lyric_store;
-pub mod github_fetcher;
 pub mod lyric_service;
 pub mod lyric_store;
 pub mod lyric_syncer;

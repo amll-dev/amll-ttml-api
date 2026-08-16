@@ -1,14 +1,9 @@
-use std::collections::HashMap;
-
 use compact_str::CompactString;
 
 use crate::core::{
     LyricId,
     matcher::normalize_name_for_comparison,
-    models::{
-        LyricIndexDB,
-        SongEntry,
-    },
+    models::SongEntry,
 };
 
 #[allow(clippy::too_many_arguments)]
@@ -51,42 +46,5 @@ pub fn make_song(
             .iter()
             .map(|s| CompactString::new(*s))
             .collect(),
-    }
-}
-
-pub fn build_test_db(songs: Vec<SongEntry>) -> LyricIndexDB {
-    let mut id_idx: HashMap<LyricId, usize> = HashMap::new();
-    let mut ncm_idx: HashMap<CompactString, Vec<usize>> = HashMap::new();
-    let mut spotify_idx: HashMap<CompactString, Vec<usize>> = HashMap::new();
-    let mut author_id_idx: HashMap<CompactString, Vec<usize>> = HashMap::new();
-    let mut author_username_idx: HashMap<CompactString, Vec<usize>> = HashMap::new();
-
-    for (i, song) in songs.iter().enumerate() {
-        id_idx.insert(song.id, i);
-
-        for id in &song.ncm_music_ids {
-            ncm_idx.entry(id.clone()).or_default().push(i);
-        }
-        for id in &song.spotify_ids {
-            spotify_idx.entry(id.clone()).or_default().push(i);
-        }
-        for id in &song.author_ids {
-            author_id_idx.entry(id.clone()).or_default().push(i);
-        }
-        for id in &song.author_usernames {
-            author_username_idx.entry(id.clone()).or_default().push(i);
-        }
-    }
-
-    LyricIndexDB {
-        entries: songs,
-        id_idx,
-        ncm_idx,
-        qq_idx: HashMap::new(),
-        apple_idx: HashMap::new(),
-        spotify_idx,
-        isrc_idx: HashMap::new(),
-        author_id_idx,
-        author_username_idx,
     }
 }

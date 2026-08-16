@@ -150,10 +150,7 @@ pub fn merge_and_sort_hits<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::test_utils::{
-        build_test_db,
-        make_song,
-    };
+    use crate::core::test_utils::make_song;
 
     // 维度 1：优先级分桶与排序压制关系测试
     // 测试不同等级的匹配类型（如元数据强命中、主歌词正文命中、
@@ -191,7 +188,7 @@ mod tests {
             &[],
         );
 
-        let db = build_test_db(vec![e1.clone(), e2.clone(), e3.clone()]);
+        let db = LyricIndexDB::from_entries(vec![e1.clone(), e2.clone(), e3.clone()]);
 
         // e1: Priority 5 (Metadata Medium)
         // e2: Priority 3 (Main Lyric match, no metadata match)
@@ -250,7 +247,7 @@ mod tests {
             &[],
         );
 
-        let db = build_test_db(vec![e1.clone(), e2.clone()]);
+        let db = LyricIndexDB::from_entries(vec![e1.clone(), e2.clone()]);
 
         // 场景 A：比较 BM25 rank (0.1 比 0.5 优先)
         let lyric_hits_bm25 = vec![
@@ -315,7 +312,7 @@ mod tests {
 
         let (first, second) = if e1.id < e2.id { (e1, e2) } else { (e2, e1) };
 
-        let db = build_test_db(vec![first.clone(), second.clone()]);
+        let db = LyricIndexDB::from_entries(vec![first.clone(), second.clone()]);
 
         let meta_hits = vec![
             MetadataHit {
@@ -362,7 +359,7 @@ mod tests {
             &[],
         );
 
-        let db = build_test_db(vec![e1, e2]);
+        let db = LyricIndexDB::from_entries(vec![e1, e2]);
 
         let meta_hits = vec![MetadataHit {
             entry: &db.entries[0],
@@ -399,7 +396,7 @@ mod tests {
             &[],
         );
 
-        let db = build_test_db(vec![e1]);
+        let db = LyricIndexDB::from_entries(vec![e1]);
 
         // 包含不存在的悬挂 ID (999999)
         let lyric_hits = vec![LyricHit {

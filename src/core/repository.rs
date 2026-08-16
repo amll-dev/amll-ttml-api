@@ -165,10 +165,7 @@ mod tests {
     use super::*;
     use crate::core::{
         LyricId,
-        test_utils::{
-            build_test_db,
-            make_song,
-        },
+        test_utils::make_song,
     };
 
     // --- find_by_ids tests ---
@@ -198,7 +195,7 @@ mod tests {
             ),
         ];
         let target_id = songs[1].id;
-        let db = build_test_db(songs);
+        let db = LyricIndexDB::from_entries(songs);
         let query = IdQuery {
             id: Some(target_id),
             ..Default::default()
@@ -209,7 +206,7 @@ mod tests {
 
     #[test]
     fn find_by_id_not_found() {
-        let db = build_test_db(vec![make_song(
+        let db = LyricIndexDB::from_entries(vec![make_song(
             "a.ttml",
             100,
             &["Song A"],
@@ -252,7 +249,7 @@ mod tests {
             ),
         ];
         let id_of_b = songs[1].id;
-        let db = build_test_db(songs);
+        let db = LyricIndexDB::from_entries(songs);
 
         let query = IdQuery {
             filename: Some("a.ttml".into()),
@@ -276,7 +273,7 @@ mod tests {
             &[],
         )];
         let id = songs[0].id;
-        let db = build_test_db(songs);
+        let db = LyricIndexDB::from_entries(songs);
         let query = IdQuery {
             id: Some(id),
             ncm_music_ids: vec!["999".into()],
@@ -288,7 +285,7 @@ mod tests {
 
     #[test]
     fn find_by_filename_exact_match() {
-        let db = build_test_db(vec![
+        let db = LyricIndexDB::from_entries(vec![
             make_song(
                 "1768754400682-250306205-r6IrpmBd.ttml",
                 100,
@@ -320,7 +317,7 @@ mod tests {
 
     #[test]
     fn find_by_filename_not_found() {
-        let db = build_test_db(vec![make_song(
+        let db = LyricIndexDB::from_entries(vec![make_song(
             "1768754400682-250306205-r6IrpmBd.ttml",
             100,
             &["Song A"],
@@ -340,7 +337,7 @@ mod tests {
 
     #[test]
     fn find_by_filename_ignores_other_ids() {
-        let db = build_test_db(vec![
+        let db = LyricIndexDB::from_entries(vec![
             make_song(
                 "a.ttml",
                 100,
@@ -374,7 +371,7 @@ mod tests {
 
     #[test]
     fn find_by_single_ncm_id() {
-        let db = build_test_db(vec![
+        let db = LyricIndexDB::from_entries(vec![
             make_song(
                 "a.ttml",
                 100,
@@ -406,7 +403,7 @@ mod tests {
 
     #[test]
     fn find_by_single_spotify_id() {
-        let db = build_test_db(vec![
+        let db = LyricIndexDB::from_entries(vec![
             make_song(
                 "a.ttml",
                 100,
@@ -438,7 +435,7 @@ mod tests {
 
     #[test]
     fn find_by_cross_platform_and() {
-        let db = build_test_db(vec![
+        let db = LyricIndexDB::from_entries(vec![
             make_song(
                 "a.ttml",
                 100,
@@ -472,7 +469,7 @@ mod tests {
 
     #[test]
     fn find_by_cross_platform_and_no_match() {
-        let db = build_test_db(vec![make_song(
+        let db = LyricIndexDB::from_entries(vec![make_song(
             "a.ttml",
             100,
             &["Song A"],
@@ -494,7 +491,7 @@ mod tests {
 
     #[test]
     fn find_by_ids_multiple_same_type_and() {
-        let db = build_test_db(vec![
+        let db = LyricIndexDB::from_entries(vec![
             make_song(
                 "a.ttml",
                 100,
@@ -527,7 +524,7 @@ mod tests {
 
     #[test]
     fn find_by_ids_no_results() {
-        let db = build_test_db(vec![make_song(
+        let db = LyricIndexDB::from_entries(vec![make_song(
             "a.ttml",
             100,
             &["Song A"],
@@ -549,7 +546,7 @@ mod tests {
 
     #[test]
     fn search_by_music_name() {
-        let db = build_test_db(vec![
+        let db = LyricIndexDB::from_entries(vec![
             make_song(
                 "a.ttml",
                 100,
@@ -582,7 +579,7 @@ mod tests {
 
     #[test]
     fn search_by_artist_name() {
-        let db = build_test_db(vec![
+        let db = LyricIndexDB::from_entries(vec![
             make_song(
                 "a.ttml",
                 100,
@@ -615,7 +612,7 @@ mod tests {
 
     #[test]
     fn search_by_author_id_exact() {
-        let db = build_test_db(vec![
+        let db = LyricIndexDB::from_entries(vec![
             make_song(
                 "a.ttml",
                 100,
@@ -648,7 +645,7 @@ mod tests {
 
     #[test]
     fn search_by_author_id_and_music_name() {
-        let db = build_test_db(vec![
+        let db = LyricIndexDB::from_entries(vec![
             make_song(
                 "a.ttml",
                 100,
@@ -692,7 +689,7 @@ mod tests {
 
     #[test]
     fn search_by_author_username() {
-        let db = build_test_db(vec![
+        let db = LyricIndexDB::from_entries(vec![
             make_song(
                 "a.ttml",
                 100,
@@ -725,7 +722,7 @@ mod tests {
 
     #[test]
     fn search_by_global_keyword() {
-        let db = build_test_db(vec![
+        let db = LyricIndexDB::from_entries(vec![
             make_song(
                 "a.ttml",
                 100,
@@ -758,7 +755,7 @@ mod tests {
 
     #[test]
     fn search_no_results() {
-        let db = build_test_db(vec![make_song(
+        let db = LyricIndexDB::from_entries(vec![make_song(
             "a.ttml",
             100,
             &["Love Story"],
@@ -778,7 +775,7 @@ mod tests {
 
     #[test]
     fn search_sorted_by_timestamp_desc_on_equal_score() {
-        let db = build_test_db(vec![
+        let db = LyricIndexDB::from_entries(vec![
             make_song(
                 "old.ttml",
                 100,
