@@ -23,8 +23,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 # 本地开发（默认 0.0.0.0:3000，可用 PORT 覆盖）
 cargo run
 
-# 全部测试（测试全部内联在 src 下的 #[cfg(test)] 模块，没有 tests/ 目录）
+# 全部测试。单测内联在 src 下的 #[cfg(test)] 模块
+# （含 src/wire_format_tests.rs 线格式金样测试）；
+# 集成测试 tests/architecture.rs 是依赖方向守卫
 cargo test
+
+# 只跑线格式金样测试（改动响应结构前后的快速验证）
+cargo test wire_format
+
+# 有意变更线格式时：重新生成快照，然后 review diff 再提交
+INSTA_UPDATE=always cargo test wire_format
 
 # 单个测试 / 单个模块
 cargo test find_by_id_exact_match
@@ -42,41 +50,67 @@ cargo build --release
 
 ## 架构
 
-### 双数据源
+### 数据模型：SQLite 单一事实来源
 
-这是理解本项目的关键。同一批歌词同时存在于两处，用途不同：
+这是理解本项目的关键。SQLite 是唯一事实来源，内存索引是它的派生缓存视图：
 
-1. **内存索引** `Arc<ArcSwap<LyricIndexDB>>`（`core/models.rs`、`core/repository.rs`）
-   只含元数据（歌名、歌手、专辑、各平台 ID、作者），从上游 `raw-lyrics-index.jsonl` 构建。
-   附带多个 `HashMap` 倒排索引，供 ID 精确查找和元数据模糊打分使用。
-   整体替换而非增量更新，`ArcSwap` 保证读路径无锁。
-
-2. **SQLite**（`core/db/setup.rs`）
-   存完整数据，含 `raw_ttml` 与 `lyric_text`。`lyrics` 主表 + `lyrics_fts`（FTS5 trigram 分词）
-   虚表，靠三个 trigger 自动同步。歌词正文全文检索走这里。
+1. **SQLite**（`core/db/`）
+   存完整数据：元数据（歌名、歌手、专辑、各平台 ID、作者，及 normalized 版本）、
+   `raw_ttml` 原文与 `lyric_text` 正文。`lyrics` 主表 + `lyrics_fts`（FTS5 trigram 分词）
+   虚表，靠三个 trigger 自动同步，歌词正文全文检索走这里。
    FTS5 建表失败只 warn 不 panic，因此正文检索属于可降级能力。
+   表结构与查询同居一处：`setup.rs`（DDL）与 `queries.rs`（FTS 检索、按文件名取
+   raw TTML、重建索引用的元数据投影查询）互为同一契约的两半，改任一侧必须同步另一侧。
 
-`AppState`（`core/state.rs`）同时持有两者，并挂了两层 moka 缓存：`ttml_cache`（原始 TTML）和
-`formatted_lyric_cache`（转成 LRC/纯文本的结果），TTL 均为 168 小时。`sync_secret` 在启动时显式解析注入至 `AppState`，供 Webhook 鉴权直接消费。
+2. **内存索引** `Arc<ArcSwap<LyricIndexDB>>`（`core/models.rs`、`core/repository.rs`）
+   只含元数据的倒排索引（主键 ID / 平台 ID / 作者 → 条目），供 ID 精确查找与元数据
+   模糊打分。不落盘：启动时与每次同步后从 SQLite 重建——`fetch_song_entries`
+   （只投影元数据列，`raw_ttml` 等内容大列不进内存）→ `LyricIndexDB::from_entries`
+   （`spawn_blocking` 组装）→ `swap_index`（`ArcSwap` 原子换入，读路径无锁）。
 
-`LyricId`（`core/lyric_id.rs`）是歌词 ID 的强类型表示，封装 53 位 JavaScript Safe Integer 安全区间 (`0 ..= 0x001F_FFFF_FFFF_FFFF`)，提供边界校验、字符串解析以及由文件名生成哈希 ID 的统一接口。
+`LyricId`（`core/lyric_id.rs`）是歌词 ID 的强类型表示，封装 53 位 JavaScript Safe Integer
+安全区间 (`0 ..= 0x001F_FFFF_FFFF_FFFF`)，提供边界校验、字符串解析以及由文件名生成哈希 ID 的统一接口。
+
+### services 组件
+
+- **`DbLyricStore`**（`services/db_lyric_store.rs`）：生产版 `LyricStore` 实现。
+  三级取词（moka 缓存 → SQLite → GitHub 兜底 `github_fetcher`）、FTS 检索、
+  索引持有与重建（`swap_index` / `invalidate_caches` / `rebuild_index`）。
+  挂两层 moka 缓存：`ttml_cache`（原始 TTML）与 `formatted_lyric_cache`
+  （LRC/纯文本解析结果），TTL 均为 168 小时。
+- **`LyricSyncer`**（`services/lyric_syncer.rs`）：同步编排器，见下文同步服务。
+- **`lyric_service`**（`services/lyric_service.rs`）：业务层自由函数，见下文请求分层。
+- **`AppState`**（`services/app_state.rs`）：axum `State` 的全局状态，纯装配——
+  持有 `store` / `syncer` / `start_time`（status 端点报 uptime）/ `sync_secret`
+  （webhook 鉴权），自身不含业务方法。`Clone` 为浅拷贝，所有克隆共享同一套连接、缓存与锁。
+
+### 依赖方向
+
+规则矩阵：api → {services, core, utils}；services → {core, utils}；core → {utils}。
+由 `tests/architecture.rs` 以源码扫描强制——按字符串匹配 `api::` / `services::`，
+因此 core/services 的注释里不要出现这类路径字面量，会误报。
 
 ### 请求分层
 
 ```
-lib.rs 路由 → api/<模块>/extractor.rs → api/<模块>/handler.rs → services/lyric_service.rs (LyricService<R: LyricStore>) → LyricStore Trait (AppState / MemoryLyricStore)
+lib.rs 路由 → api/<模块>/extractor.rs → api/<模块>/handler.rs → services/lyric_service.rs → LyricStore trait（生产 DbLyricStore / 测试 MemoryLyricStore）
 ```
 
 - `extractor.rs` 从 `RawQuery` 解析查询串，由 `api::shared::query`（`NATIVE_SEARCH_DIALECT` / `LRCLIB_SEARCH_DIALECT` / `LRCLIB_GET_DIALECT` 数据表）驱动，负责参数校验、别名映射、`q` 查询降级与分页提取。
   例如 `search` 里同时传 `q` 和具体字段时会丢弃 `q`；`get` 的优先级是 `id` > `filename` > 平台 ID 交集。
-- `handler.rs` 保持极薄，只做「提参 → 调 service → 包 JSON」。
-- `services/lyric_service.rs` 是检索编排的核心，定义了 `LyricService<R = AppState>`，面向深模块 trait `LyricStore`（`services/lyric_store.rs`）编程。
-- `LyricStore` 统一抽象了 4 个 I/O 接口：`fetch_lyric_ttml`、`fetch_parsed_lyric`、`search_lyrics_fts` 和 `load_index`。生产环境由 `AppState` 实现，测试环境由 `MemoryLyricStore` 适配。
-- 分页机制由 `api::shared::pagination` 中的 `paginate` 组合器统一收转，提供安全步长切片与 `PaginationInfo` 分页元数据生成；FTS5 正文补全触发条件独立于 `page_size`，由业务常量 `FTS_TRIGGER_MIN_HITS` 专属判定。
+- `handler.rs` 保持极薄，只做「提参 → 调 service → 映射 DTO → 包装响应」。
+  原生端点（`/lyrics/*`）经 `ApiSuccess<T>`（`api/shared/dto.rs`）自动附加
+  `{"status": 200, "data": ...}` 信封，与错误侧 `AppError` 的 `IntoResponse` 对称
+  （handler 签名统一为 `Result<ApiSuccess<T>, AppError>`）；lrclib 兼容端点返回
+  裸数组/裸对象，不套信封。
+- `lyric_service` 只返回领域数据（`SongEntry`、`LyricSearchResult`、元组配对），
+  分页在 service 内完成；DTO 映射与线格式全部留在 api 层。
+- `LyricStore` 统一抽象了 4 个 I/O 接口：`fetch_lyric_ttml`、`fetch_parsed_lyric`、`search_lyrics_fts` 和 `load_index`。
+- 分页机制由 `core/pagination.rs` 的 `paginate` 组合器统一收转，提供安全步长切片与 `PaginationInfo` 分页元数据生成；FTS5 正文补全触发条件独立于 `page_size`，由业务常量 `FTS_TRIGGER_MIN_HITS` 专属判定。
 
 ### 检索评分与合并
 
-`LyricService::search_lyric` 把两路结果融合：
+`lyric_service::search_lyric` 把两路结果融合：
 
 1. `LyricIndexDB::search_by_fields` 先粗筛（`rough_match`）再打分（`score_entry`），
    两者都在 `core/matcher/` 下（`rough.rs` / `score.rs`）：歌名/歌手/专辑加权（1.0 / 1.0 / 0.4），
@@ -93,29 +127,43 @@ lib.rs 路由 → api/<模块>/extractor.rs → api/<模块>/handler.rs → serv
 
 ### 分页机制
 
-- **解析与校验**（`api/shared/pagination.rs`）：由 `Pagination` 结构体处理，`page` 默认 1（从 1 起算），`pageSize` 默认 50，最大上限 100。传入 0、负数、非数字或 `pageSize` 超过 100 时返回 `400 Bad Request`；缺省或空字符串参数使用默认值。
+- **解析与校验**（`core/pagination.rs`）：由 `Pagination` 结构体处理，`page` 默认 1（从 1 起算），`pageSize` 默认 50，最大上限 100。传入 0、负数、非数字或 `pageSize` 超过 100 时返回 `400 Bad Request`；缺省或空字符串参数使用默认值。
 - **响应数据结构**（`api/shared/dto.rs`）：`SearchData` 响应结果中 `items` 与分页参数解耦，分页元数据统一放在嵌套的 `pagination: PaginationInfo` 结构体中（字段包括 `page`, `pageSize`, `total`, `totalPages`, `hasMore`）。
 
 ### 同步服务
 
-`services/sync_service.rs`，由三处触发：启动时、每 24 小时定时、`POST /v1/webhook/sync`（支持 `Authorization: Bearer SYNC_SECRET` 或 GitHub 原生 `X-Hub-Signature-256` HMAC-SHA256 签名校验）。
+`services/sync_service.rs` 负责从远端下载并写 SQLite；`LyricSyncer` 负责编排
+（single-flight 锁 + 索引重建 + 缓存失效）。触发源三处：启动时、每 24 小时定时、
+`POST /v1/webhook/sync`（支持 `Authorization: Bearer SYNC_SECRET` 或 GitHub 原生
+`X-Hub-Signature-256` HMAC-SHA256 签名校验）。
 
-策略是先比对上游 `version.json` 的 commit：一致且本地非空则跳过；否则本地为空走全量
-（下载 `raw-lyrics.zip` 到临时文件，`spawn_blocking` 解压解析），本地非空走增量
-（对比 index 差集，并发 20 拉取）。增量待下载数超过 500 或失败时回退全量。
-`AppState::sync_lock` 用 `try_lock` 做去重，并发触发时后来者直接返回而不是排队。
+同步管线：先比对上游 `version.json` 的 commit，一致且本地非空则跳过（零网络）；
+否则**无条件下载** `raw-lyrics-index.jsonl` 构建 `filename → 元数据` 映射——JSONL 是
+平台 ID 等元数据的唯一来源（TTML 本体不含），下载失败即中止本次同步。与本地做差集后
+按策略取内容：本地为空走全量（下载 `raw-lyrics.zip` 到临时文件，`spawn_blocking`
+解压解析），本地非空走增量（并发 20 逐文件拉取）；增量待下载数超过 500 或失败时
+回退全量。两条策略共用 `merge_raw_index_entry` 合并元数据后批量 upsert，
+保证无论走哪条路径，落库的数据形状一致。
 
-同步完成后重新拉取并整体替换内存索引，同时清空 `ttml_cache` 与 `formatted_lyric_cache` 缓存。
+`LyricSyncer` 的锁（`Arc<Mutex<()>>`，所有克隆共享）用 `try_lock` 去重，
+并发触发时后来者直接跳过而不是排队。同步成功（含跳过）后从 SQLite **本地**重建
+内存索引（无网络）并清空两层缓存；重建失败只 warn 并保留旧索引，
+与库的落差最迟下次同步收敛。
+
+启动时 `main` 在 bind 端口前 await 一次本地索引重建：端口开放即搜索可用；
+首次部署空库为空操作，随首次同步自愈。
 
 ### 其他约定
 
-- **ID**：`utils/id.rs` 用 FNV-1a 截断到 53 位，保证 JS `Number` 可安全表示。ID 由文件名派生，
+- **ID**：`core/lyric_id.rs` 用 FNV-1a 截断到 53 位，保证 JS `Number` 可安全表示。ID 由文件名派生，
   改哈希实现会让所有已发布 ID 失效。
-- **错误**：统一用 `core::error::AppError`，`IntoResponse` 输出 `{status, error, message}`。
-  上游失败映射为 502。
+- **错误**：统一用 `core::error::AppError`，`IntoResponse` 输出 `ErrorResponse` 形状的
+  `{status, error, message}`。上游失败映射为 502。
 - **build.rs**：注入 `GIT_HASH`、`GIT_COMMIT_DATE`、`RUSTC_VERSION`、`BUILD_TIME`，
   仅被 `/v1/status` 使用，改名字要同步 `api/status/handler.rs`。
-- **接口变更**：改动响应结构或参数时，接口文档和 OpenAPI 规范都在 `applemusic-like-lyrics` 仓库（见开头链接），改完要去那边同步。
+- **接口变更**：改动响应结构或参数时，先跑 `cargo test wire_format` 确认本仓库侧的
+  金样断言是否被破坏；接口文档和 OpenAPI 规范在 `applemusic-like-lyrics` 仓库
+  （见开头链接），改完要去那边同步。
 
 ## 部署
 
