@@ -1,16 +1,14 @@
 use crate::{
-    api::shared::{
-        pagination::Pagination,
-        query::{
-            LRCLIB_GET_DIALECT,
-            LRCLIB_SEARCH_DIALECT,
-            parse_search_query,
-            parse_search_query_exact,
-        },
+    api::shared::query::{
+        LRCLIB_GET_DIALECT,
+        LRCLIB_SEARCH_DIALECT,
+        parse_search_query,
+        parse_search_query_exact,
     },
     core::{
         error::AppError,
         models::SearchQuery,
+        pagination::Pagination,
     },
 };
 

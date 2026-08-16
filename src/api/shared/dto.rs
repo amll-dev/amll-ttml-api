@@ -1,9 +1,20 @@
+use axum::{
+    Json,
+    response::{
+        IntoResponse,
+        Response,
+    },
+};
 use compact_str::CompactString;
-use serde::Serialize;
+use serde::{
+    Serialize,
+    Serializer,
+};
 
 use crate::core::{
     LyricId,
     models::SongEntry,
+    pagination::PaginationInfo,
 };
 
 #[derive(Serialize, Clone, Debug)]
@@ -42,16 +53,6 @@ pub struct MatchContext {
     pub snippet: Option<String>,
 }
 
-#[derive(Serialize, Clone, Debug, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct PaginationInfo {
-    pub page: u64,
-    pub page_size: u64,
-    pub total: u64,
-    pub total_pages: u64,
-    pub has_more: bool,
-}
-
 #[derive(Serialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct SearchData {
@@ -59,10 +60,33 @@ pub struct SearchData {
     pub pagination: PaginationInfo,
 }
 
+pub struct HttpOk;
+
+impl Serialize for HttpOk {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_u16(200)
+    }
+}
+
 #[derive(Serialize)]
-pub struct ApiResponse<T> {
-    pub status: u16,
+pub struct SuccessResponse<T> {
+    pub status: HttpOk,
     pub data: T,
+}
+
+pub struct ApiSuccess<T>(pub T);
+
+impl<T: Serialize> IntoResponse for ApiSuccess<T> {
+    fn into_response(self) -> Response {
+        let envelope = SuccessResponse {
+            status: HttpOk,
+            data: self.0,
+        };
+        Json(envelope).into_response()
+    }
 }
 
 pub fn map_song_to_item(
@@ -134,8 +158,8 @@ mod tests {
 
     #[test]
     fn search_data_serialization_includes_nested_pagination() {
-        let response = ApiResponse {
-            status: 200,
+        let response = SuccessResponse {
+            status: HttpOk,
             data: SearchData {
                 items: vec![],
                 pagination: PaginationInfo {
@@ -160,5 +184,47 @@ mod tests {
         assert_eq!(pagination["total"], 156);
         assert_eq!(pagination["totalPages"], 8);
         assert_eq!(pagination["hasMore"], true);
+    }
+
+    #[test]
+    fn song_item_omits_absent_optional_fields() {
+        let filename = "1768754400682-250306205-r6IrpmBd.ttml";
+        let song = SongEntry {
+            id: LyricId::from_filename(filename),
+            filename: CompactString::new(filename),
+            timestamp: 1,
+            track_names: vec![CompactString::new("ME!")].into_boxed_slice(),
+            artist_names: Box::default(),
+            album_names: Box::default(),
+            normalized_track_names: Box::default(),
+            normalized_artist_names: Box::default(),
+            normalized_album_names: Box::default(),
+            ncm_music_ids: Box::default(),
+            qq_music_ids: Box::default(),
+            apple_music_ids: Box::default(),
+            spotify_ids: Box::default(),
+            isrcs: Box::default(),
+            author_ids: Box::default(),
+            author_usernames: Box::default(),
+        };
+
+        let bare = map_song_to_item(&song, None, None, None);
+        let json = serde_json::to_value(&bare).unwrap();
+        assert!(json.get("lyrics").is_none());
+        assert!(json.get("format").is_none());
+        assert!(json.get("matchContext").is_none());
+
+        let full = map_song_to_item(
+            &song,
+            Some("<tt/>".to_string()),
+            Some("ttml".to_string()),
+            Some(MatchContext {
+                snippet: Some("a <mark>b</mark> c".to_string()),
+            }),
+        );
+        let json = serde_json::to_value(&full).unwrap();
+        assert_eq!(json["lyrics"], "<tt/>");
+        assert_eq!(json["format"], "ttml");
+        assert_eq!(json["matchContext"]["snippet"], "a <mark>b</mark> c");
     }
 }

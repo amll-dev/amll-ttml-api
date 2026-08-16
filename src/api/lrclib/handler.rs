@@ -9,16 +9,22 @@ use axum::{
 };
 
 use crate::{
-    api::lrclib::extractor::{
-        extract_lrclib_get_query,
-        extract_lrclib_search_query,
+    api::lrclib::{
+        dto::{
+            LrclibSongItem,
+            map_to_lrclib_item,
+        },
+        extractor::{
+            extract_lrclib_get_query,
+            extract_lrclib_search_query,
+        },
     },
     core::{
         LyricId,
         error::AppError,
         state::AppState,
     },
-    services::lyric_service::LyricService,
+    services::lyric_service,
 };
 
 pub async fn handle_search(
@@ -26,7 +32,12 @@ pub async fn handle_search(
     RawQuery(raw_query): RawQuery,
 ) -> Result<impl IntoResponse, AppError> {
     let (query, pagination) = extract_lrclib_search_query(raw_query.as_deref().unwrap_or(""))?;
-    let items = LyricService::lrclib_search(&state, &query, pagination).await;
+    let hits = lyric_service::lrclib_search(&state, &query, pagination).await;
+
+    let items: Vec<LrclibSongItem> = hits
+        .into_iter()
+        .map(|(entry, formatted)| map_to_lrclib_item(&entry, formatted.as_ref()))
+        .collect();
 
     Ok(Json(items))
 }
@@ -36,9 +47,9 @@ pub async fn handle_get(
     RawQuery(raw_query): RawQuery,
 ) -> Result<impl IntoResponse, AppError> {
     let query = extract_lrclib_get_query(raw_query.as_deref().unwrap_or(""))?;
-    let item = LyricService::lrclib_get_by_fields(&state, query).await?;
+    let (entry, formatted) = lyric_service::lrclib_get_by_fields(&state, query).await?;
 
-    Ok(Json(item))
+    Ok(Json(map_to_lrclib_item(&entry, Some(&formatted))))
 }
 
 pub async fn handle_get_by_id(
@@ -46,6 +57,6 @@ pub async fn handle_get_by_id(
     Path(id): Path<u64>,
 ) -> Result<impl IntoResponse, AppError> {
     let lyric_id = LyricId::from_u64(id)?;
-    let item = LyricService::lrclib_get_by_id(&state, lyric_id).await?;
-    Ok(Json(item))
+    let (entry, formatted) = lyric_service::lrclib_get_by_id(&state, lyric_id).await?;
+    Ok(Json(map_to_lrclib_item(&entry, Some(&formatted))))
 }

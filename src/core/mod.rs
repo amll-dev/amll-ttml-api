@@ -3,6 +3,7 @@ pub mod error;
 pub mod lyric_id;
 pub mod matcher;
 pub mod models;
+pub mod pagination;
 pub mod repository;
 pub mod state;
 

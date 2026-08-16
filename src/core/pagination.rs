@@ -1,7 +1,6 @@
-use crate::{
-    api::shared::dto::PaginationInfo,
-    core::error::AppError,
-};
+use serde::Serialize;
+
+use crate::core::error::AppError;
 
 pub const DEFAULT_PAGE: u64 = 1;
 pub const DEFAULT_PAGE_SIZE: u64 = 50;
@@ -94,6 +93,16 @@ fn parse_positive(raw: &str, field: &str) -> Result<u64, AppError> {
     }
 
     Ok(value)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PaginationInfo {
+    pub page: u64,
+    pub page_size: u64,
+    pub total: u64,
+    pub total_pages: u64,
+    pub has_more: bool,
 }
 
 /// 分页组合器输出结果，包含当前页的切片数据与完整的分页元数据信息

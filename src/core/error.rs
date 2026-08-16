@@ -33,7 +33,7 @@ impl From<serde_json::Error> for AppError {
 }
 
 #[derive(Serialize)]
-struct ErrorPayload {
+struct ErrorResponse {
     status: u16,
     error: &'static str,
     message: String,
@@ -43,7 +43,7 @@ impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         let (status, error_str, message) = self.parts();
 
-        let payload = ErrorPayload {
+        let payload = ErrorResponse {
             status,
             error: error_str,
             message,
@@ -125,10 +125,10 @@ mod tests {
     }
 
     #[test]
-    fn error_payload_serialization() {
+    fn error_response_serialization() {
         let err = AppError::BadRequest("test".into());
         let (status, error, message) = err.parts();
-        let payload = ErrorPayload {
+        let payload = ErrorResponse {
             status,
             error,
             message,

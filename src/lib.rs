@@ -34,6 +34,9 @@ mod core;
 mod services;
 mod utils;
 
+#[cfg(test)]
+mod wire_format_tests;
+
 pub fn create_app(state: AppState) -> Router {
     let v1_routes = Router::new()
         .route("/status", get(api::status::handler::handle_status))

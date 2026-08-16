@@ -1,15 +1,13 @@
 use url::form_urlencoded;
 
-use crate::{
-    api::shared::pagination::Pagination,
-    core::{
-        LyricId,
-        error::AppError,
-        models::{
-            IdQuery,
-            SearchQuery,
-        },
+use crate::core::{
+    LyricId,
+    error::AppError,
+    models::{
+        IdQuery,
+        SearchQuery,
     },
+    pagination::Pagination,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -109,4 +109,25 @@ mod tests {
         assert_eq!(item.plain_lyrics, None);
         assert_eq!(item.synced_lyrics, None);
     }
+
+    #[test]
+    fn test_map_to_lrclib_item_with_formatted_lyrics() {
+        let entry = make_test_entry();
+        let formatted = TTMLFormatResult {
+            plain_lyrics: Some("First line\nSecond line".to_string()),
+            synced_lyrics: Some("[00:01.00] First line".to_string()),
+            duration: 1.5,
+        };
+
+        let item = map_to_lrclib_item(&entry, Some(&formatted));
+
+        assert_eq!(item.duration, 1.5);
+        assert_eq!(
+            item.plain_lyrics.as_deref(),
+            Some("First line\nSecond line")
+        );
+        assert_eq!(item.synced_lyrics.as_deref(), Some("[00:01.00] First line"));
+        assert_eq!(item.track_name, "Primary Title");
+        assert!(!item.instrumental);
+    }
 }

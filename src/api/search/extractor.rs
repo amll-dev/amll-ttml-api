@@ -1,14 +1,12 @@
 use crate::{
-    api::shared::{
-        pagination::Pagination,
-        query::{
-            NATIVE_SEARCH_DIALECT,
-            parse_search_query,
-        },
+    api::shared::query::{
+        NATIVE_SEARCH_DIALECT,
+        parse_search_query,
     },
     core::{
         error::AppError,
         models::SearchQuery,
+        pagination::Pagination,
     },
 };
 

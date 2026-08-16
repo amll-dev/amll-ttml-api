@@ -1,5 +1,4 @@
 use axum::{
-    Json,
     extract::{
         RawQuery,
         State,
@@ -8,12 +7,18 @@ use axum::{
 };
 
 use crate::{
-    api::get::extractor::extract_get_query,
+    api::{
+        get::extractor::extract_get_query,
+        shared::dto::{
+            ApiSuccess,
+            map_song_to_item,
+        },
+    },
     core::{
         error::AppError,
         state::AppState,
     },
-    services::lyric_service::LyricService,
+    services::lyric_service,
 };
 
 pub async fn handle_get(
@@ -22,6 +27,12 @@ pub async fn handle_get(
 ) -> Result<impl IntoResponse, AppError> {
     let get_query = extract_get_query(raw_query.as_deref().unwrap_or(""))?;
 
-    let result = LyricService::get_lyric(&state, get_query.id_query, get_query.format).await?;
-    Ok(Json(result))
+    let (entry, ttml_text) = lyric_service::get_lyric(&state, get_query.id_query).await?;
+
+    Ok(ApiSuccess(map_song_to_item(
+        &entry,
+        Some(ttml_text),
+        Some(get_query.format),
+        None,
+    )))
 }

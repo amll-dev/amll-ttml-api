@@ -178,3 +178,10 @@ pub struct LyricHit {
     pub field: LyricMatchField,
     pub snippet: Option<String>,
 }
+
+/// `lyrics/search` 的一条命中结果，包含条目本体和可选的歌词正文命中信息
+#[derive(Debug, Clone)]
+pub struct LyricSearchResult {
+    pub entry: SongEntry,
+    pub lyric_hit: Option<LyricHit>,
+}
