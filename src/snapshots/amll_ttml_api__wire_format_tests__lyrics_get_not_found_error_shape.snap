@@ -1,0 +1,5 @@
+---
+source: src/wire_format_tests.rs
+expression: body
+---
+{"status":404,"error":"Not Found","message":"No lyrics found for the provided query."}

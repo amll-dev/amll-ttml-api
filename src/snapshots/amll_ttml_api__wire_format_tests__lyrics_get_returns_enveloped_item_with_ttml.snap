@@ -1,0 +1,5 @@
+---
+source: src/wire_format_tests.rs
+expression: body
+---
+{"status":200,"data":{"id":699269132670751,"filename":"test_song_one.ttml","musicNames":["Test Song One"],"artistNames":["Artist Alpha"],"albumNames":[],"ncmMusicIds":["1001"],"qqMusicIds":[],"appleMusicIds":[],"spotifyIds":["sp1001"],"isrcs":[],"authorIds":[],"authorUsernames":[],"lyrics":"<tt xmlns=\"http://www.w3.org/ns/ttml\"><body><div><p begin=\"00:01.000\" end=\"00:03.000\">Hello World Lyric</p></div></body></tt>","format":"ttml"}}

@@ -1,0 +1,5 @@
+---
+source: src/wire_format_tests.rs
+expression: body
+---
+[{"id":5440178231786117,"name":"Test Song Two","trackName":"Test Song Two","artistName":"Artist Beta","albumName":"","duration":4.0,"instrumental":false,"plainLyrics":"Second Song Lyric","syncedLyrics":"[00:02.00] Second Song Lyric"},{"id":699269132670751,"name":"Test Song One","trackName":"Test Song One","artistName":"Artist Alpha","albumName":"","duration":3.0,"instrumental":false,"plainLyrics":"Hello World Lyric","syncedLyrics":"[00:01.00] Hello World Lyric"}]

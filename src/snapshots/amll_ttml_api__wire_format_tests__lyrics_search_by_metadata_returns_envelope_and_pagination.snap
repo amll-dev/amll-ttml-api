@@ -1,0 +1,5 @@
+---
+source: src/wire_format_tests.rs
+expression: body
+---
+{"status":200,"data":{"items":[{"id":699269132670751,"filename":"test_song_one.ttml","musicNames":["Test Song One"],"artistNames":["Artist Alpha"],"albumNames":[],"ncmMusicIds":["1001"],"qqMusicIds":[],"appleMusicIds":[],"spotifyIds":["sp1001"],"isrcs":[],"authorIds":[],"authorUsernames":[]}],"pagination":{"page":1,"pageSize":50,"total":1,"totalPages":1,"hasMore":false}}}
