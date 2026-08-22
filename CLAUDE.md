@@ -24,8 +24,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 cargo run
 
 # 全部测试。单测内联在 src 下的 #[cfg(test)] 模块
-# （含 src/wire_format_tests.rs 线格式金样测试）；
-# 集成测试 tests/architecture.rs 是依赖方向守卫
+# （含 src/wire_format_tests.rs 线格式金样测试）
 cargo test
 
 # 只跑线格式金样测试（改动响应结构前后的快速验证）
@@ -77,7 +76,7 @@ cargo build --release
   三级取词（moka 缓存 → SQLite → GitHub 兜底 `github_fetcher`）、FTS 检索、
   索引持有与重建（`swap_index` / `invalidate_caches` / `rebuild_index`）。
   挂两层 moka 缓存：`ttml_cache`（原始 TTML）与 `formatted_lyric_cache`
-  （LRC/纯文本解析结果），TTL 均为 168 小时。
+  （LRC/纯文本解析结果），TTL 均为 14 天。
 - **`LyricSyncer`**（`services/lyric_syncer.rs`）：同步编排器，见下文同步服务。
 - **`lyric_service`**（`services/lyric_service.rs`）：业务层自由函数，见下文请求分层。
 - **`AppState`**（`services/app_state.rs`）：axum `State` 的全局状态，纯装配——
@@ -123,6 +122,16 @@ lib.rs 路由 → api/<模块>/extractor.rs → api/<模块>/handler.rs → serv
 
 - **解析与校验**（`core/pagination.rs`）：由 `Pagination` 结构体处理，`page` 默认 1（从 1 起算），`pageSize` 默认 50，最大上限 100。传入 0、负数、非数字或 `pageSize` 超过 100 时返回 `400 Bad Request`；缺省或空字符串参数使用默认值。
 - **响应数据结构**（`api/shared/dto.rs`）：`SearchData` 响应结果中 `items` 与分页参数解耦，分页元数据统一放在嵌套的 `pagination: PaginationInfo` 结构体中（字段包括 `page`, `pageSize`, `total`, `totalPages`, `hasMore`）。
+
+### 缓存机制与时限
+
+响应头由 `api/shared/cache.rs` 统一管理 `Cache-Control`：
+- **强唯一性歌词获取**（`GET /v1/lyrics/get?id=...` 或 `?filename=...` 及 `GET /v1/lrclib/get/{id}`）：`public, max-age=1209600, s-maxage=1209600`（14 天）。Moka 进程内缓存 TTL 同步为 14 天。
+- **模糊匹配与平台 ID 获取**（`GET /v1/lyrics/get?ncmMusicId=...` 等平台 ID 查询及 `GET /v1/lrclib/get` 歌名歌手查询）：`public, max-age=259200, s-maxage=604800, stale-while-revalidate=86400`（客户端 3 天 / CDN 7 天 / SWR 1 天异步刷新）。
+- **歌词搜索接口**（`GET /v1/lyrics/search` 及 `GET /v1/lrclib/search`）：`public, max-age=3600, s-maxage=7200, stale-while-revalidate=1800`（客户端 1 小时 / CDN 2 小时 / SWR 30 分钟）。
+- **404 未找到响应**（`LyricNotFound` 及未匹配路由）：`public, max-age=3600, s-maxage=7200`（客户端 1 小时 / CDN 2 小时负缓存）。
+- **服务状态与探针**（`GET /v1/status` 及 `GET /v1/version`）：`no-store`（禁止任何层级缓存，保证 uptime 与探针实时性）。
+- **主动失效**：仅在数据同步且发生实际更新时（`res.status == SyncStatus::Updated`），调用 `invalidate_caches()` 清空进程内 Moka 缓存并原子切换倒排索引；若同步被跳过或无数据变更（`SyncStatus::Skipped`），则完整保留热缓存与现有索引。
 
 ### 同步服务
 

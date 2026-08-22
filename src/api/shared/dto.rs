@@ -1,6 +1,9 @@
 use axum::{
     Json,
-    http::StatusCode,
+    http::{
+        StatusCode,
+        header::CACHE_CONTROL,
+    },
     response::{
         IntoResponse,
         Response,
@@ -12,11 +15,14 @@ use serde::{
     Serializer,
 };
 
-use crate::core::{
-    LyricId,
-    error::AppError,
-    models::SongEntry,
-    pagination::PaginationInfo,
+use crate::{
+    api::shared::cache::NOT_FOUND_CACHE_CONTROL,
+    core::{
+        LyricId,
+        error::AppError,
+        models::SongEntry,
+        pagination::PaginationInfo,
+    },
 };
 
 #[derive(Serialize, Clone, Debug)]
@@ -145,11 +151,19 @@ impl IntoResponse for AppError {
             message,
         };
 
-        (
+        let mut response = (
             StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
             Json(payload),
         )
-            .into_response()
+            .into_response();
+
+        if status == 404 {
+            response
+                .headers_mut()
+                .insert(CACHE_CONTROL, NOT_FOUND_CACHE_CONTROL);
+        }
+
+        response
     }
 }
 

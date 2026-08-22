@@ -5,18 +5,26 @@ use axum::{
         RawQuery,
         State,
     },
+    http::header,
     response::IntoResponse,
 };
 
 use crate::{
-    api::lrclib::{
-        dto::{
-            LrclibSongItem,
-            map_to_lrclib_item,
+    api::{
+        lrclib::{
+            dto::{
+                LrclibSongItem,
+                map_to_lrclib_item,
+            },
+            extractor::{
+                extract_lrclib_get_query,
+                extract_lrclib_search_query,
+            },
         },
-        extractor::{
-            extract_lrclib_get_query,
-            extract_lrclib_search_query,
+        shared::cache::{
+            EXACT_CACHE_CONTROL,
+            SEARCH_CACHE_CONTROL,
+            WEAK_CACHE_CONTROL,
         },
     },
     core::{
@@ -41,7 +49,7 @@ pub async fn handle_search(
         .map(|(entry, formatted)| map_to_lrclib_item(&entry, formatted.as_ref()))
         .collect();
 
-    Ok(Json(items))
+    Ok(([(header::CACHE_CONTROL, SEARCH_CACHE_CONTROL)], Json(items)))
 }
 
 pub async fn handle_get(
@@ -51,7 +59,10 @@ pub async fn handle_get(
     let query = extract_lrclib_get_query(raw_query.as_deref().unwrap_or(""))?;
     let (entry, formatted) = lyric_service::lrclib_get_by_fields(&state.store, query).await?;
 
-    Ok(Json(map_to_lrclib_item(&entry, Some(&formatted))))
+    Ok((
+        [(header::CACHE_CONTROL, WEAK_CACHE_CONTROL)],
+        Json(map_to_lrclib_item(&entry, Some(&formatted))),
+    ))
 }
 
 pub async fn handle_get_by_id(
@@ -60,5 +71,8 @@ pub async fn handle_get_by_id(
 ) -> Result<impl IntoResponse, AppError> {
     let lyric_id = LyricId::from_u64(id)?;
     let (entry, formatted) = lyric_service::lrclib_get_by_id(&state.store, lyric_id).await?;
-    Ok(Json(map_to_lrclib_item(&entry, Some(&formatted))))
+    Ok((
+        [(header::CACHE_CONTROL, EXACT_CACHE_CONTROL)],
+        Json(map_to_lrclib_item(&entry, Some(&formatted))),
+    ))
 }

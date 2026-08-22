@@ -51,12 +51,12 @@ impl DbLyricStore {
 
         let ttml_cache = Cache::builder()
             .max_capacity(10_000)
-            .time_to_live(Duration::from_hours(168))
+            .time_to_live(Duration::from_hours(14 * 24))
             .build();
 
         let formatted_lyric_cache = Cache::builder()
             .max_capacity(10_000)
-            .time_to_live(Duration::from_hours(168))
+            .time_to_live(Duration::from_hours(14 * 24))
             .build();
 
         Self {

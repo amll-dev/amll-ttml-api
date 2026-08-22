@@ -1,11 +1,15 @@
 use axum::{
     Json,
     extract::State,
+    http::header,
     response::IntoResponse,
 };
 use serde::Serialize;
 
-use crate::services::AppState;
+use crate::{
+    api::shared::cache::NO_STORE_CACHE_CONTROL,
+    services::AppState,
+};
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -51,19 +55,24 @@ pub async fn handle_status(State(state): State<AppState>) -> impl IntoResponse {
         },
     };
 
-    Json(response)
+    (
+        [(header::CACHE_CONTROL, NO_STORE_CACHE_CONTROL)],
+        Json(response),
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use axum::{
         extract::State,
+        http::header,
         response::IntoResponse,
     };
 
     use super::handle_status;
     use crate::{
         AppState,
+        api::shared::cache::NO_STORE_CACHE_CONTROL,
         init_db,
     };
 
@@ -74,5 +83,9 @@ mod tests {
         let response = handle_status(State(state)).await.into_response();
 
         assert_eq!(response.status(), axum::http::StatusCode::OK);
+        assert_eq!(
+            response.headers().get(header::CACHE_CONTROL).unwrap(),
+            NO_STORE_CACHE_CONTROL
+        );
     }
 }

@@ -112,6 +112,14 @@ pub struct IdQuery {
     pub isrcs: Vec<String>,
 }
 
+impl IdQuery {
+    /// 是否为基于强唯一标识（ID 或文件名）的精确查询
+    #[must_use]
+    pub const fn is_exact(&self) -> bool {
+        self.id.is_some() || self.filename.is_some()
+    }
+}
+
 #[derive(Default)]
 pub struct SearchQuery {
     pub global_keyword: Option<String>,

@@ -3,17 +3,21 @@ use axum::{
         RawQuery,
         State,
     },
+    http::header,
     response::IntoResponse,
 };
 
 use crate::{
     api::{
         search::extractor::extract_search_query,
-        shared::dto::{
-            ApiSuccess,
-            MatchContext,
-            SearchData,
-            map_song_to_item,
+        shared::{
+            cache::SEARCH_CACHE_CONTROL,
+            dto::{
+                ApiSuccess,
+                MatchContext,
+                SearchData,
+                map_song_to_item,
+            },
         },
     },
     core::error::AppError,
@@ -44,8 +48,11 @@ pub async fn handle_search(
         })
         .collect();
 
-    Ok(ApiSuccess(SearchData {
-        items,
-        pagination: result.pagination,
-    }))
+    Ok((
+        [(header::CACHE_CONTROL, SEARCH_CACHE_CONTROL)],
+        ApiSuccess(SearchData {
+            items,
+            pagination: result.pagination,
+        }),
+    ))
 }

@@ -27,7 +27,10 @@ use crate::{
     core::error::AppError,
     services::{
         db_lyric_store::DbLyricStore,
-        sync_service::SyncService,
+        sync_service::{
+            SyncService,
+            SyncStatus,
+        },
     },
 };
 
@@ -63,11 +66,18 @@ impl LyricSyncer {
         match syncer.sync().await {
             Ok(res) => {
                 info!("Sync completed with status: {:?}", res.status);
-                match self.store.rebuild_index().await {
-                    Ok(()) => self.store.invalidate_caches(),
-                    Err(e) => {
-                        warn!("Index rebuild failed, keeping previous index: {e:?}");
+                if res.status == SyncStatus::Updated {
+                    info!(
+                        "Database was updated with new entries, rebuilding index and invalidating caches."
+                    );
+                    match self.store.rebuild_index().await {
+                        Ok(()) => self.store.invalidate_caches(),
+                        Err(e) => {
+                            warn!("Index rebuild failed, keeping previous index: {e:?}");
+                        }
                     }
+                } else {
+                    info!("Database was not changed, keeping existing in-memory index and caches.");
                 }
                 Ok(())
             }

@@ -11,8 +11,10 @@ use axum::{
         to_bytes,
     },
     http::{
+        HeaderMap,
         Request,
         StatusCode,
+        header::CACHE_CONTROL,
     },
 };
 use insta::assert_snapshot;
@@ -24,6 +26,13 @@ use tower::ServiceExt;
 
 use crate::{
     AppState,
+    api::shared::cache::{
+        EXACT_CACHE_CONTROL,
+        NO_STORE_CACHE_CONTROL,
+        NOT_FOUND_CACHE_CONTROL,
+        SEARCH_CACHE_CONTROL,
+        WEAK_CACHE_CONTROL,
+    },
     core::{
         LyricId,
         db::entity,
@@ -81,7 +90,7 @@ async fn test_app() -> Router {
     create_app(state)
 }
 
-async fn get_body(app: &Router, uri: &str) -> (StatusCode, String) {
+async fn get_response(app: &Router, uri: &str) -> (StatusCode, HeaderMap, String) {
     let response = app
         .clone()
         .oneshot(
@@ -92,13 +101,20 @@ async fn get_body(app: &Router, uri: &str) -> (StatusCode, String) {
         .await
         .expect("router call is infallible");
     let status = response.status();
+    let headers = response.headers().clone();
     let bytes = to_bytes(response.into_body(), usize::MAX)
         .await
         .expect("read response body");
     (
         status,
+        headers,
         String::from_utf8(bytes.to_vec()).expect("utf-8 body"),
     )
+}
+
+async fn get_body(app: &Router, uri: &str) -> (StatusCode, String) {
+    let (status, _, body) = get_response(app, uri).await;
+    (status, body)
 }
 
 fn id_of(filename: &str) -> u64 {
@@ -174,4 +190,60 @@ async fn lyrics_get_not_found_error_shape() {
 
     assert_eq!(status, StatusCode::NOT_FOUND);
     assert_snapshot!(body);
+}
+
+#[tokio::test]
+async fn cache_control_exact_and_weak_headers() {
+    let app = test_app().await;
+
+    let id_1 = id_of("test_song_one.ttml");
+    let (status, headers, _) = get_response(&app, &format!("/v1/lyrics/get?id={id_1}")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(headers.get(CACHE_CONTROL).unwrap(), EXACT_CACHE_CONTROL);
+
+    let (status, headers, _) =
+        get_response(&app, "/v1/lyrics/get?filename=test_song_one.ttml").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(headers.get(CACHE_CONTROL).unwrap(), EXACT_CACHE_CONTROL);
+
+    let (status, headers, _) = get_response(&app, &format!("/v1/lrclib/get/{id_1}")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(headers.get(CACHE_CONTROL).unwrap(), EXACT_CACHE_CONTROL);
+
+    let (status, headers, _) = get_response(&app, "/v1/lyrics/get?spotifyId=sp1001").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(headers.get(CACHE_CONTROL).unwrap(), WEAK_CACHE_CONTROL);
+
+    let (status, headers, _) = get_response(
+        &app,
+        "/v1/lrclib/get?track_name=Test+Song+One&artist_name=Artist+Alpha",
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(headers.get(CACHE_CONTROL).unwrap(), WEAK_CACHE_CONTROL);
+
+    let (status, headers, _) = get_response(&app, "/v1/lyrics/get?spotifyId=missing").await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(headers.get(CACHE_CONTROL).unwrap(), NOT_FOUND_CACHE_CONTROL);
+
+    let (status, headers, _) = get_response(&app, "/v1/nonexistent_route").await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    assert_eq!(headers.get(CACHE_CONTROL).unwrap(), NOT_FOUND_CACHE_CONTROL);
+
+    let (status, headers, _) =
+        get_response(&app, "/v1/lyrics/search?musicName=Test+Song+One").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(headers.get(CACHE_CONTROL).unwrap(), SEARCH_CACHE_CONTROL);
+
+    let (status, headers, _) = get_response(&app, "/v1/lrclib/search?q=Artist").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(headers.get(CACHE_CONTROL).unwrap(), SEARCH_CACHE_CONTROL);
+
+    let (status, headers, _) = get_response(&app, "/v1/status").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(headers.get(CACHE_CONTROL).unwrap(), NO_STORE_CACHE_CONTROL);
+
+    let (status, headers, _) = get_response(&app, "/v1/version").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(headers.get(CACHE_CONTROL).unwrap(), NO_STORE_CACHE_CONTROL);
 }
