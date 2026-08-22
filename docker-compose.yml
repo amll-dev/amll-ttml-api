@@ -1,0 +1,14 @@
+services:
+  amll-ttml-api:
+    image: ghcr.io/amll-dev/amll-ttml-api:latest
+    container_name: amll-ttml-api
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - DATABASE_URL=sqlite:///data/amll_lyrics.db?mode=rwc
+      # - SENTRY_DSN=
+      # - SYNC_SECRET=
+    volumes:
+      - ./data:/data

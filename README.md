@@ -37,12 +37,35 @@ cargo build --release
 
 #### 2. Docker 部署
 
+##### 使用预构建镜像
+
+直接使用从 GitHub Container Registry 发布的官方镜像：
+
+```bash
+mkdir -p data
+
+docker run -d \
+  --name amll-ttml-api \
+  --restart unless-stopped \
+  -p 3000:3000 \
+  -v $(pwd)/data:/data \
+  ghcr.io/amll-dev/amll-ttml-api:latest
+```
+
+或使用 `docker compose` 一键启动：
+
+```bash
+docker compose up -d
+```
+
+##### 本地构建镜像
+
 ```bash
 # 构建 Docker 镜像
 docker build -t amll-ttml-api .
 
 # 运行 Docker 容器
-docker run -d -p 3000:3000 --name amll-ttml-api amll-ttml-api
+docker run -d -p 3000:3000 -v $(pwd)/data:/data --name amll-ttml-api amll-ttml-api
 ```
 
 ## 许可
