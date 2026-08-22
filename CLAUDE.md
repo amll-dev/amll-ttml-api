@@ -84,12 +84,6 @@ cargo build --release
   持有 `store` / `syncer` / `start_time`（status 端点报 uptime）/ `sync_secret`
   （webhook 鉴权），自身不含业务方法。`Clone` 为浅拷贝，所有克隆共享同一套连接、缓存与锁。
 
-### 依赖方向
-
-规则矩阵：api → {services, core, utils}；services → {core, utils}；core → {utils}。
-由 `tests/architecture.rs` 以源码扫描强制——按字符串匹配 `api::` / `services::`，
-因此 core/services 的注释里不要出现这类路径字面量，会误报。
-
 ### 请求分层
 
 ```
@@ -157,8 +151,12 @@ lib.rs 路由 → api/<模块>/extractor.rs → api/<模块>/handler.rs → serv
 
 - **ID**：`core/lyric_id.rs` 用 FNV-1a 截断到 53 位，保证 JS `Number` 可安全表示。ID 由文件名派生，
   改哈希实现会让所有已发布 ID 失效。
-- **错误**：统一用 `core::error::AppError`，`IntoResponse` 输出 `ErrorResponse` 形状的
-  `{status, error, message}`。上游失败映射为 502。
+- **错误**：类型在 core（`AppError`），HTTP 映射在 api（`api/shared/dto.rs` 的
+  `IntoResponse` 实现，输出 `ErrorResponse` 形状的 `{status, error, message}`）。
+  4xx 消息面向客户端（描述其输入问题）；5xx 的内部细节进日志 / Sentry
+  （`IntoResponse` 里的 `error!`，sentry-tracing 的 ERROR 过滤器自动上报）。
+  纯内部多步 IO 流水线（如 `sync_service`）允许 anyhow，跨组件边界必须转换，
+  保留完整错误链。上游失败映射为 502。
 - **build.rs**：注入 `GIT_HASH`、`GIT_COMMIT_DATE`、`RUSTC_VERSION`、`BUILD_TIME`，
   仅被 `/v1/status` 使用，改名字要同步 `api/status/handler.rs`。
 - **接口变更**：改动响应结构或参数时，先跑 `cargo test wire_format` 确认本仓库侧的

@@ -1,5 +1,6 @@
 use axum::{
     Json,
+    http::StatusCode,
     response::{
         IntoResponse,
         Response,
@@ -13,6 +14,7 @@ use serde::{
 
 use crate::core::{
     LyricId,
+    error::AppError,
     models::SongEntry,
     pagination::PaginationInfo,
 };
@@ -86,6 +88,68 @@ impl<T: Serialize> IntoResponse for ApiSuccess<T> {
             data: self.0,
         };
         Json(envelope).into_response()
+    }
+}
+
+#[derive(Serialize)]
+pub struct ErrorResponse {
+    pub status: u16,
+    pub error: &'static str,
+    pub message: String,
+}
+
+const INTERNAL_ERROR_MESSAGE: &str = "An internal error occurred.";
+const UPSTREAM_ERROR_MESSAGE: &str = "Upstream service unavailable.";
+
+fn error_parts(err: &AppError) -> (u16, &'static str, String) {
+    match err {
+        AppError::ReqwestError(_) | AppError::JsonError(_) | AppError::InternalServerError(_) => {
+            (500, "Internal Server Error", INTERNAL_ERROR_MESSAGE.into())
+        }
+        AppError::NotFound => (
+            404,
+            "Not Found",
+            "The requested API route does not exist.".into(),
+        ),
+        AppError::LyricNotFound => (
+            404,
+            "Not Found",
+            "No lyrics found for the provided query.".into(),
+        ),
+        AppError::BadRequest(msg) => (400, "Bad Request", msg.clone()),
+        AppError::Unauthorized => (
+            401,
+            "Unauthorized",
+            "Invalid or missing authorization token.".into(),
+        ),
+        AppError::UpstreamError(_) => (502, "Bad Gateway", UPSTREAM_ERROR_MESSAGE.into()),
+    }
+}
+
+impl IntoResponse for AppError {
+    fn into_response(self) -> Response {
+        let (status, error_str, message) = error_parts(&self);
+
+        if status >= 500 {
+            tracing::error!(
+                status,
+                error = error_str,
+                detail = ?self,
+                "Request failed with server error"
+            );
+        }
+
+        let payload = ErrorResponse {
+            status,
+            error: error_str,
+            message,
+        };
+
+        (
+            StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
+            Json(payload),
+        )
+            .into_response()
     }
 }
 
@@ -226,5 +290,54 @@ mod tests {
         assert_eq!(json["lyrics"], "<tt/>");
         assert_eq!(json["format"], "ttml");
         assert_eq!(json["matchContext"]["snippet"], "a <mark>b</mark> c");
+    }
+
+    #[test]
+    fn bad_request_message_is_client_facing() {
+        let err = AppError::BadRequest("Missing params".into());
+        let (status, error, message) = error_parts(&err);
+        assert_eq!((status, error), (400, "Bad Request"));
+        assert_eq!(message, "Missing params");
+    }
+
+    #[test]
+    fn not_found_messages_are_client_facing() {
+        let (status, error, message) = error_parts(&AppError::NotFound);
+        assert_eq!((status, error), (404, "Not Found"));
+        assert_eq!(message, "The requested API route does not exist.");
+
+        let (status, _, message) = error_parts(&AppError::LyricNotFound);
+        assert_eq!(status, 404);
+        assert_eq!(message, "No lyrics found for the provided query.");
+    }
+
+    #[test]
+    fn server_error_messages_are_generic() {
+        let (status, _, message) = error_parts(&AppError::InternalServerError(
+            "FTS Query Error: database is locked".into(),
+        ));
+        assert_eq!(status, 500);
+        assert_eq!(message, "An internal error occurred.");
+
+        let (status, _, message) = error_parts(&AppError::UpstreamError(
+            "context: Failed to download zip: connection reset".into(),
+        ));
+        assert_eq!(status, 502);
+        assert_eq!(message, "Upstream service unavailable.");
+    }
+
+    #[test]
+    fn error_response_serialization() {
+        let (status, error, message) = error_parts(&AppError::BadRequest("test".into()));
+        let payload = ErrorResponse {
+            status,
+            error,
+            message,
+        };
+        let json = serde_json::to_string(&payload).unwrap();
+        assert_eq!(
+            json,
+            r#"{"status":400,"error":"Bad Request","message":"test"}"#
+        );
     }
 }

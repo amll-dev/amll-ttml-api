@@ -73,7 +73,7 @@ impl LyricSyncer {
             }
             Err(e) => {
                 error!("Sync failed: {e:?}");
-                Err(AppError::UpstreamError(e.to_string()))
+                Err(AppError::UpstreamError(format!("{e:#}")))
             }
         }
     }
