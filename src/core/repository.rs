@@ -6,6 +6,7 @@ use std::collections::{
 use compact_str::CompactString;
 
 use crate::core::{
+    LyricId,
     matcher::{
         MatchType,
         PreparedQuery,
@@ -46,12 +47,13 @@ impl LyricIndexDB {
         }
 
         if let Some(ref filename) = query.filename {
+            let derived_id = LyricId::from_filename(filename);
             return self
-                .entries
-                .iter()
-                .enumerate()
-                .find(|(_, entry)| entry.filename.as_str() == filename.as_str())
-                .map(|(idx, _)| vec![idx])
+                .id_idx
+                .get(&derived_id)
+                .copied()
+                .filter(|&idx| self.entries[idx].filename.as_str() == filename.as_str())
+                .map(|idx| vec![idx])
                 .unwrap_or_default();
         }
 
