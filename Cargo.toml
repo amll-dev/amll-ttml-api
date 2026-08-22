@@ -55,6 +55,7 @@ zip = "8.6.0"
 
 [dev-dependencies]
 insta = "1.48.0"
+tower = { version = "0.5", features = ["util"] }
 
 [lints.clippy]
 pedantic = { level = "warn", priority = -1 }
