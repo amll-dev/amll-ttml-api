@@ -47,6 +47,8 @@ sudo apt-get update && sudo apt-get install -y \
     curl \
     git \
     nginx \
+    libnginx-mod-http-brotli-filter \
+    libnginx-mod-http-brotli-static \
     certbot \
     python3-certbot-nginx
 ```
@@ -147,6 +149,37 @@ server {
     add_header X-Content-Type-Options "nosniff" always;
     add_header Strict-Transport-Security "max-age=31536000" always;
     add_header Content-Security-Policy "default-src '\''none'\''; frame-ancestors '\''none'\''; sandbox" always;
+
+    gzip on;
+    gzip_vary on;
+    gzip_proxied any;
+    gzip_comp_level 9;
+    gzip_min_length 256;
+    gzip_http_version 1.1;
+    gzip_types
+        application/json
+        text/plain
+        text/css
+        application/javascript
+        text/javascript
+        application/xml
+        text/xml
+        application/xml+rss
+        image/svg+xml;
+
+    brotli on;
+    brotli_comp_level 6;
+    brotli_min_length 256;
+    brotli_types
+        application/json
+        text/plain
+        text/css
+        application/javascript
+        text/javascript
+        application/xml
+        text/xml
+        application/xml+rss
+        image/svg+xml;
 
     location / {
         proxy_pass http://amll_api_backend;
