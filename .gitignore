@@ -1,6 +1,5 @@
 /target
 .wrangler
-Cargo.lock
 data
 .env
 *.snap.new
