@@ -3,6 +3,7 @@ use std::time::Duration;
 
 use axum::{
     Router,
+    middleware::from_fn,
     routing::{
         get,
         post,
@@ -68,6 +69,7 @@ pub fn create_app(state: AppState) -> Router {
         .nest("/v1", v1_routes.clone())
         .nest("/api/v1", v1_routes)
         .fallback(|| async { AppError::NotFound })
+        .layer(from_fn(api::shared::etag::apply))
         .layer(NewSentryLayer::new_from_top())
         .layer(SentryHttpLayer::new().enable_transaction())
         .layer(create_cors_layer())

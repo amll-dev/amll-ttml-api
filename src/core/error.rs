@@ -6,6 +6,7 @@ pub enum AppError {
     LyricNotFound,
     BadRequest(String),
     Unauthorized,
+    TooEarly,
     InternalServerError(String),
     UpstreamError(String),
 }

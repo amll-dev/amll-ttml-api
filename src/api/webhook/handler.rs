@@ -28,6 +28,12 @@ pub async fn handle_webhook_sync(
     State(state): State<AppState>,
     body: Bytes,
 ) -> Result<Json<Value>, AppError> {
+    // 触发同步是非幂等操作，而 TLS 1.3 的 0-RTT 早期数据可被重放，
+    // 因此在做任何签名校验之前先拒绝，要求客户端在完整握手后重试
+    if is_early_data(&headers) {
+        return Err(AppError::TooEarly);
+    }
+
     let expected_secret = state.sync_secret.as_deref().ok_or_else(|| {
         AppError::InternalServerError(
             "SYNC_SECRET environment variable is not configured on the server.".to_string(),
@@ -81,6 +87,18 @@ pub async fn handle_webhook_sync(
         "status": 200,
         "message": "Sync triggered"
     })))
+}
+
+/// 请求是否随 TLS 1.3 的 0-RTT 早期数据到达
+///
+/// nginx 侧配了 `ssl_early_data on` 与 `proxy_set_header Early-Data $ssl_early_data;`。
+/// 变量为空时 nginx 会省略该头，所以只有走了早期数据的请求才带 `Early-Data: 1`。
+/// 读接口重放无害，不做拦截
+fn is_early_data(headers: &HeaderMap) -> bool {
+    headers
+        .get("Early-Data")
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.trim() == "1")
 }
 
 fn verify_webhook_auth(headers: &HeaderMap, body: &[u8], secret: &str) -> bool {
@@ -198,6 +216,38 @@ mod tests {
 
         let payload = Bytes::from_static(b"{\"force\": true}");
         let res = handle_webhook_sync(headers, State(state), payload).await;
+        assert!(res.is_ok());
+    }
+
+    /// 0-RTT 早期数据可被重放，即使签名合法也必须拒绝
+    #[tokio::test]
+    async fn test_webhook_sync_rejects_tls_early_data() {
+        let db_conn = init_db("sqlite::memory:").await.unwrap();
+        let state = AppState::new_with_secret(db_conn, Some("test_secret"));
+
+        let mut headers = HeaderMap::new();
+        headers.insert("Authorization", "Bearer test_secret".parse().unwrap());
+        headers.insert("Early-Data", "1".parse().unwrap());
+        let res = handle_webhook_sync(headers, State(state.clone()), Bytes::new()).await;
+        assert!(matches!(res, Err(AppError::TooEarly)));
+
+        // 早期数据检查在签名校验之前，未授权请求同样先得到 425
+        let mut headers = HeaderMap::new();
+        headers.insert("Early-Data", "1".parse().unwrap());
+        let res = handle_webhook_sync(headers, State(state.clone()), Bytes::new()).await;
+        assert!(matches!(res, Err(AppError::TooEarly)));
+
+        // 完整握手的请求不带该头，nginx 在变量为空时会省略，正常放行
+        let mut headers = HeaderMap::new();
+        headers.insert("Authorization", "Bearer test_secret".parse().unwrap());
+        let res = handle_webhook_sync(headers, State(state.clone()), Bytes::new()).await;
+        assert!(res.is_ok());
+
+        // 只有值为 1 才算早期数据
+        let mut headers = HeaderMap::new();
+        headers.insert("Authorization", "Bearer test_secret".parse().unwrap());
+        headers.insert("Early-Data", "0".parse().unwrap());
+        let res = handle_webhook_sync(headers, State(state), Bytes::new()).await;
         assert!(res.is_ok());
     }
 }

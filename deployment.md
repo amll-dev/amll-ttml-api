@@ -141,6 +141,11 @@ server {
     ssl_protocols TLSv1.2 TLSv1.3;
     ssl_prefer_server_ciphers on;
 
+    ssl_session_cache   shared:SSL:10m;
+    ssl_session_timeout 1d;
+    ssl_early_data on;
+    keepalive_timeout   300s;
+
     error_log  /var/log/nginx/amll-api-error.log;
     access_log /var/log/nginx/amll-api-access.log;
 
@@ -190,6 +195,7 @@ server {
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_set_header Early-Data \$ssl_early_data;
     }
 }
 EOF'

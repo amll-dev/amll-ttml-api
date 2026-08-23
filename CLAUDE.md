@@ -126,12 +126,26 @@ lib.rs 路由 → api/<模块>/extractor.rs → api/<模块>/handler.rs → serv
 ### 缓存机制与时限
 
 响应头由 `api/shared/cache.rs` 统一管理 `Cache-Control`：
-- **强唯一性歌词获取**（`GET /v1/lyrics/get?id=...` 或 `?filename=...` 及 `GET /v1/lrclib/get/{id}`）：`public, max-age=1209600, s-maxage=1209600`（14 天）。Moka 进程内缓存 TTL 同步为 14 天。
-- **模糊匹配与平台 ID 获取**（`GET /v1/lyrics/get?ncmMusicId=...` 等平台 ID 查询及 `GET /v1/lrclib/get` 歌名歌手查询）：`public, max-age=259200, s-maxage=604800, stale-while-revalidate=86400`（客户端 3 天 / CDN 7 天 / SWR 1 天异步刷新）。
+- **强唯一性歌词获取**（`GET /v1/lyrics/get?id=...` 或 `?filename=...` 及 `GET /v1/lrclib/get/{id}`）：`public, max-age=604800, s-maxage=2592000, stale-while-revalidate=2592000`（客户端 7 天 / CDN 30 天 / SWR 30 天）。
+- **模糊匹配与平台 ID 获取**（`GET /v1/lyrics/get?ncmMusicId=...` 等平台 ID 查询及 `GET /v1/lrclib/get` 歌名歌手查询）：`public, max-age=604800, s-maxage=604800, stale-while-revalidate=604800`（客户端 7 天 / CDN 7 天 / SWR 7 天）。匹配结果会随上游新增歌词而变化（近期约 2 首/天），因此任何层级都不超过 7 天新鲜期，不给 CDN 30 天那一档。
 - **歌词搜索接口**（`GET /v1/lyrics/search` 及 `GET /v1/lrclib/search`）：`public, max-age=3600, s-maxage=7200, stale-while-revalidate=1800`（客户端 1 小时 / CDN 2 小时 / SWR 30 分钟）。
 - **404 未找到响应**（`LyricNotFound` 及未匹配路由）：`public, max-age=3600, s-maxage=7200`（客户端 1 小时 / CDN 2 小时负缓存）。
 - **服务状态与探针**（`GET /v1/status` 及 `GET /v1/version`）：`no-store`（禁止任何层级缓存，保证 uptime 与探针实时性）。
+- **进程内缓存**：`DbLyricStore` 的 `ttml_cache` 与 `formatted_lyric_cache` TTL 均为 14 天，与上面的 HTTP 时限相互独立；实际存活受下面的主动失效约束。
 - **主动失效**：仅在数据同步且发生实际更新时（`res.status == SyncStatus::Updated`），调用 `invalidate_caches()` 清空进程内 Moka 缓存并原子切换倒排索引；若同步被跳过或无数据变更（`SyncStatus::Skipped`），则完整保留热缓存与现有索引。
+
+### 条件请求（ETag）
+
+`api/shared/etag.rs` 是挂在路由最内层的中间件（`lib.rs` 里第一个 `.layer()`，因此位于
+CORS 与 Trace 之内），为响应生成 `ETag` 并处理 `If-None-Match`，命中则降级为 304。
+
+- **取值是响应体的 SHA-256 前 16 字节**，不是派生版本号。响应是「上游数据 × 本服务代码」
+  的产物——上游元数据重算、LRC 解析器修正、DTO 结构调整都会改变响应体，body 哈希
+  把这些来源一网打尽。
+- **作用范围由 `Cache-Control` 自动决定**：只给带 `public` 的 200 响应打标签，
+  所以 `no-store` 的探针端点、负缓存的 404、400 都不参与。新增端点选定缓存档位即自动获得。
+- **304 必须带回 `ETag` 与 `Cache-Control`**（复用原响应的 header map 实现），
+  后者用于刷新客户端已存副本的新鲜度，缺失会导致下次请求立刻又要重新验证。
 
 ### 同步服务
 
@@ -139,6 +153,11 @@ lib.rs 路由 → api/<模块>/extractor.rs → api/<模块>/handler.rs → serv
 （single-flight 锁 + 索引重建 + 缓存失效）。触发源三处：启动时、每 24 小时定时、
 `POST /v1/webhook/sync`（支持 `Authorization: Bearer SYNC_SECRET` 或 GitHub 原生
 `X-Hub-Signature-256` HMAC-SHA256 签名校验）。
+
+触发同步是非幂等操作，而 nginx 开了 `ssl_early_data on`（TLS 1.3 0-RTT），早期数据可被重放。
+因此 webhook handler 在**签名校验之前**先检查 nginx 透传的 `Early-Data: 1`（RFC 8470），
+命中则返回 `425 Too Early`（`AppError::TooEarly`）要求客户端在完整握手后重试。
+读接口重放无害，不做拦截。由 `test_webhook_sync_rejects_tls_early_data` 守住。
 
 同步管线：先比对上游 `version.json` 的 commit，一致且本地非空则跳过（零网络）；
 否则**无条件下载** `raw-lyrics-index.jsonl` 构建 `filename → 元数据` 映射——JSONL 是

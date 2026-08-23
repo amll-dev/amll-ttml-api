@@ -1,3 +1,4 @@
+use axum::http::header::ETAG;
 use tower_http::cors::{
     Any,
     CorsLayer,
@@ -8,4 +9,5 @@ pub fn create_cors_layer() -> CorsLayer {
         .allow_origin(Any)
         .allow_methods(Any)
         .allow_headers(Any)
+        .expose_headers([ETAG])
 }

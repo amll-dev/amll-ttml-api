@@ -128,6 +128,12 @@ fn error_parts(err: &AppError) -> (u16, &'static str, String) {
             "Unauthorized",
             "Invalid or missing authorization token.".into(),
         ),
+        AppError::TooEarly => (
+            425,
+            "Too Early",
+            "Request arrived in TLS early data and may be a replay; retry on a completed handshake."
+                .into(),
+        ),
         AppError::UpstreamError(_) => (502, "Bad Gateway", UPSTREAM_ERROR_MESSAGE.into()),
     }
 }
