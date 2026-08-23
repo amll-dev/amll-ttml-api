@@ -88,7 +88,7 @@ impl SyncService {
         Self { db, client }
     }
 
-    pub async fn sync(&self) -> Result<SyncResult> {
+    pub async fn sync(&self, force: bool) -> Result<SyncResult> {
         let remote_version = match self.fetch_remote_version().await {
             Ok(v) => Some(v),
             Err(e) => {
@@ -99,7 +99,7 @@ impl SyncService {
 
         let local_commit = self.get_local_commit().await?;
 
-        if let Some(ref remote) = remote_version {
+        if !force && let Some(ref remote) = remote_version {
             info!(
                 "Local commit: {:?}, Remote commit: {}",
                 local_commit.as_deref().unwrap_or("None"),
@@ -131,15 +131,20 @@ impl SyncService {
         let to_download: Vec<String> = remote_files.difference(&local_files).cloned().collect();
 
         info!(
-            "Remote files: {}, Local files: {}, To download: {}",
+            "Remote files: {}, Local files: {}, To download: {}, Force: {}",
             remote_files.len(),
             local_files.len(),
-            to_download.len()
+            to_download.len(),
+            force
         );
 
-        let result = if local_files.is_empty() {
-            info!("No local data, performing full sync...");
-            self.perform_full_sync(&index_map, &to_download).await?
+        let result = if force || local_files.is_empty() {
+            info!(
+                "Performing full sync (force={}, local_empty={})...",
+                force,
+                local_files.is_empty()
+            );
+            self.perform_full_sync(&index_map).await?
         } else {
             info!("Attempting incremental sync...");
             match self
@@ -149,7 +154,7 @@ impl SyncService {
                 Ok(res) => res,
                 Err(e) => {
                     warn!("Incremental sync failed: {e:?}, falling back to full sync");
-                    self.perform_full_sync(&index_map, &to_download).await?
+                    self.perform_full_sync(&index_map).await?
                 }
             }
         };
@@ -243,7 +248,6 @@ impl SyncService {
     async fn perform_full_sync(
         &self,
         index_map: &HashMap<String, RawIndexEntry>,
-        to_download: &[String],
     ) -> Result<SyncResult> {
         let url = format!("{DB_BASE}/raw-lyrics/raw-lyrics.zip");
         info!("Downloading full lyrics archive from: {url}");
@@ -271,52 +275,45 @@ impl SyncService {
         info!("Downloaded {downloaded_bytes} bytes, parsing zip archive...");
         temp_file.seek(SeekFrom::Start(0))?;
 
-        let parsed_entries = tokio::task::spawn_blocking(move || -> Result<Vec<entity::Model>> {
-            let mut archive =
-                ZipArchive::new(temp_file.as_file()).context("Failed to open zip archive")?;
-            let mut models = Vec::new();
+        let mut parsed_entries =
+            tokio::task::spawn_blocking(move || -> Result<Vec<entity::Model>> {
+                let mut archive =
+                    ZipArchive::new(temp_file.as_file()).context("Failed to open zip archive")?;
+                let mut models = Vec::new();
 
-            for i in 0..archive.len() {
-                let mut file = archive.by_index(i).context("Failed to read zip entry")?;
-                if Path::new(file.name())
-                    .extension()
-                    .is_some_and(|ext| ext.eq_ignore_ascii_case("ttml"))
-                    && !file.is_dir()
-                {
-                    let mut content = String::new();
-                    if file.read_to_string(&mut content).is_ok()
-                        && let Ok(result) = ttml_processor::parse_ttml(&content)
+                for i in 0..archive.len() {
+                    let mut file = archive.by_index(i).context("Failed to read zip entry")?;
+                    if Path::new(file.name())
+                        .extension()
+                        .is_some_and(|ext| ext.eq_ignore_ascii_case("ttml"))
+                        && !file.is_dir()
                     {
-                        let filename = file.name().to_string();
-                        let model = build_entity_from_ttml(&filename, &content, &result);
-                        models.push(model);
+                        let mut content = String::new();
+                        if file.read_to_string(&mut content).is_ok()
+                            && let Ok(result) = ttml_processor::parse_ttml(&content)
+                        {
+                            let filename = file.name().to_string();
+                            let model = build_entity_from_ttml(&filename, &content, &result);
+                            models.push(model);
+                        }
                     }
                 }
-            }
-            Ok(models)
-        })
-        .await??;
+                Ok(models)
+            })
+            .await??;
 
-        let total_parsed = parsed_entries.len();
-        let to_download_set: HashSet<&str> = to_download.iter().map(String::as_str).collect();
-        let mut new_entries: Vec<entity::Model> = parsed_entries
-            .into_iter()
-            .filter(|m| to_download_set.contains(m.filename.as_str()))
-            .collect();
+        info!(
+            "Parsed {} entries from zip archive. Merging index entries and writing to SQLite...",
+            parsed_entries.len()
+        );
 
-        for model in &mut new_entries {
+        for model in &mut parsed_entries {
             if let Some(raw) = index_map.get(model.filename.as_str()) {
                 merge_raw_index_entry(model, raw.clone());
             }
         }
 
-        info!(
-            "Parsed {} entries from zip archive. Found {} new entries to insert into SQLite...",
-            total_parsed,
-            new_entries.len()
-        );
-
-        if new_entries.is_empty() {
+        if parsed_entries.is_empty() {
             return Ok(SyncResult {
                 status: SyncStatus::Skipped,
                 count: Some(0),
@@ -325,11 +322,11 @@ impl SyncService {
             });
         }
 
-        self.batch_upsert_entries(&new_entries).await?;
+        self.batch_upsert_entries(&parsed_entries).await?;
 
         Ok(SyncResult {
             status: SyncStatus::Updated,
-            count: Some(new_entries.len()),
+            count: Some(parsed_entries.len()),
             error: None,
             strategy: Some("full".to_string()),
         })
@@ -389,6 +386,15 @@ impl SyncService {
             "Successfully downloaded and parsed {} new entries",
             fetched_models.len()
         );
+
+        if fetched_models.is_empty() {
+            return Ok(SyncResult {
+                status: SyncStatus::Skipped,
+                count: Some(0),
+                error: None,
+                strategy: Some("incremental".to_string()),
+            });
+        }
 
         self.batch_upsert_entries(&fetched_models).await?;
 
@@ -544,5 +550,80 @@ pub fn merge_raw_index_entry(model: &mut entity::Model, raw: RawIndexEntry) {
     }
     if !author_usernames.is_empty() {
         model.author_usernames = serde_json::to_value(author_usernames).unwrap_or_default();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    #[test]
+    fn test_build_entity_from_ttml_basic_metadata() {
+        let ttml = r#"<tt xmlns="http://www.w3.org/ns/ttml" xmlns:ttm="http://www.w3.org/ns/ttml#metadata" xmlns:amll="http://www.example.com/ns/amll">
+        <head>
+            <metadata>
+                <amll:meta key="musicName" value="Test Song" />
+                <amll:meta key="artists" value="Test Artist" />
+                <amll:meta key="album" value="Test Album" />
+                <amll:meta key="ttmlAuthorGithub" value="999" />
+                <amll:meta key="ttmlAuthorGithubLogin" value="dev_user" />
+            </metadata>
+        </head>
+        <body>
+            <div>
+                <p begin="00:01.000" end="00:03.000">Hello world</p>
+            </div>
+        </body>
+        </tt>"#;
+
+        let parsed = ttml_processor::parse_ttml(ttml).expect("parse ttml");
+        let model = build_entity_from_ttml("1689087424000-999-abc.ttml", ttml, &parsed);
+
+        assert_eq!(model.track_names, json!(["Test Song"]));
+        assert_eq!(model.artist_names, json!(["Test Artist"]));
+        assert_eq!(model.album_names, json!(["Test Album"]));
+        assert_eq!(model.author_ids, json!(["999"]));
+        assert_eq!(model.author_usernames, json!(["dev_user"]));
+        // Platform IDs are initialized to empty in build_entity_from_ttml, as they are sourced from
+        // index.jsonl
+        assert_eq!(model.ncm_music_ids, json!([]));
+        assert_eq!(model.qq_music_ids, json!([]));
+        assert_eq!(model.spotify_ids, json!([]));
+        assert_eq!(model.apple_music_ids, json!([]));
+        assert_eq!(model.isrcs, json!([]));
+    }
+
+    #[test]
+    fn test_merge_raw_index_entry_binds_all_platform_ids() {
+        let ttml = r#"<tt xmlns="http://www.w3.org/ns/ttml"><head><metadata></metadata></head><body><div><p begin="00:01.000" end="00:02.000">Text</p></div></body></tt>"#;
+        let parsed = ttml_processor::parse_ttml(ttml).expect("parse ttml");
+        let mut model = build_entity_from_ttml("1689087424000-999-abc.ttml", ttml, &parsed);
+
+        assert_eq!(model.ncm_music_ids, json!([]));
+        assert_eq!(model.qq_music_ids, json!([]));
+        assert_eq!(model.apple_music_ids, json!([]));
+        assert_eq!(model.spotify_ids, json!([]));
+        assert_eq!(model.isrcs, json!([]));
+
+        let raw = RawIndexEntry {
+            raw_lyric_file: "1689087424000-999-abc.ttml".to_string(),
+            metadata: vec![
+                ("ncmMusicId".to_string(), vec!["1001".to_string()]),
+                ("qqMusicId".to_string(), vec!["001abc".to_string()]),
+                ("appleMusicId".to_string(), vec!["am123".to_string()]),
+                ("spotifyId".to_string(), vec!["sp1001".to_string()]),
+                ("isrc".to_string(), vec!["US123".to_string()]),
+            ],
+        };
+
+        merge_raw_index_entry(&mut model, raw);
+
+        assert_eq!(model.ncm_music_ids, json!(["1001"]));
+        assert_eq!(model.qq_music_ids, json!(["001abc"]));
+        assert_eq!(model.apple_music_ids, json!(["am123"]));
+        assert_eq!(model.spotify_ids, json!(["sp1001"]));
+        assert_eq!(model.isrcs, json!(["US123"]));
     }
 }

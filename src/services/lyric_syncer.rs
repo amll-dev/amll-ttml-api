@@ -51,19 +51,21 @@ impl LyricSyncer {
 
     /// 触发一次同步；已有同步在途时跳过（不排队）
     ///
+    /// 如果 force 为 true，将会触发强制全量同步
+    ///
     /// # Errors
     ///
     /// SQLite 同步失败时返回 [`AppError::UpstreamError`]；索引重建失败不报错，
     /// 保留旧索引继续服务
-    pub async fn sync(&self) -> Result<(), AppError> {
+    pub async fn sync(&self, force: bool) -> Result<(), AppError> {
         let Ok(_guard) = self.lock.try_lock() else {
             info!("Database sync is already in progress, skipping duplicate request.");
             return Ok(());
         };
 
-        info!("Running database sync service...");
+        info!(force, "Running database sync service...");
         let syncer = SyncService::new(self.store.conn.clone(), self.store.client.clone());
-        match syncer.sync().await {
+        match syncer.sync(force).await {
             Ok(res) => {
                 info!("Sync completed with status: {:?}", res.status);
                 if res.status == SyncStatus::Updated {

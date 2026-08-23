@@ -60,14 +60,12 @@ const FTS_TRIGGERS: [&str; 3] = [
     ",
     r"
     CREATE TRIGGER IF NOT EXISTS lyrics_ad AFTER DELETE ON lyrics BEGIN
-        INSERT INTO lyrics_fts(lyrics_fts, rowid, filename, lyric_text, bg_vocal_text)
-        VALUES('delete', old.id, old.filename, old.lyric_text, old.bg_vocal_text);
+        DELETE FROM lyrics_fts WHERE rowid = old.id;
     END;
     ",
     r"
     CREATE TRIGGER IF NOT EXISTS lyrics_au AFTER UPDATE ON lyrics BEGIN
-        INSERT INTO lyrics_fts(lyrics_fts, rowid, filename, lyric_text, bg_vocal_text)
-        VALUES('delete', old.id, old.filename, old.lyric_text, old.bg_vocal_text);
+        DELETE FROM lyrics_fts WHERE rowid = old.id;
         INSERT INTO lyrics_fts(rowid, filename, lyric_text, bg_vocal_text)
         VALUES (new.id, new.filename, new.lyric_text, new.bg_vocal_text);
     END;
@@ -96,6 +94,11 @@ pub async fn init_db(db_url: &str) -> Result<DatabaseConnection, DbErr> {
     if let Err(e) = fts_res {
         tracing::warn!("Failed to create FTS5 table (might not be supported by sqlite build): {e}");
     } else {
+        let _ = db
+            .execute_unprepared(
+                "DROP TRIGGER IF EXISTS lyrics_ad; DROP TRIGGER IF EXISTS lyrics_au;",
+            )
+            .await;
         for t in FTS_TRIGGERS {
             if let Err(e) = db.execute_unprepared(t).await {
                 tracing::warn!("Failed to create FTS trigger: {e}");

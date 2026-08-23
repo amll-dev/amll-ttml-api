@@ -43,9 +43,15 @@ pub async fn handle_webhook_sync(
         .and_then(|h| h.to_str().ok())
         .unwrap_or("unknown");
 
+    let force = serde_json::from_slice::<Value>(&body)
+        .ok()
+        .and_then(|v| v.get("force").and_then(Value::as_bool))
+        .unwrap_or(false);
+
     if let Ok(payload_json) = serde_json::from_slice::<Value>(&body) {
         info!(
             event = %event_type,
+            force,
             payload = %payload_json,
             "Webhook sync triggered via API"
         );
@@ -53,18 +59,20 @@ pub async fn handle_webhook_sync(
         let body_str = String::from_utf8_lossy(&body);
         info!(
             event = %event_type,
+            force,
             body = %body_str,
             "Webhook sync triggered via API"
         );
     } else {
         info!(
             event = %event_type,
+            force,
             "Webhook sync triggered via API with empty body"
         );
     }
     let state_clone = state;
     tokio::spawn(async move {
-        if let Err(e) = state_clone.syncer.sync().await {
+        if let Err(e) = state_clone.syncer.sync(force).await {
             tracing::error!("Webhook triggered sync failed: {e:?}");
         }
     });
@@ -178,5 +186,18 @@ mod tests {
         headers.insert("X-Hub-Signature-256", "sha1=invalid".parse().unwrap());
         let res = handle_webhook_sync(headers, State(state), payload).await;
         assert!(matches!(res, Err(AppError::Unauthorized)));
+    }
+
+    #[tokio::test]
+    async fn test_webhook_sync_force_payload() {
+        let db_conn = init_db("sqlite::memory:").await.unwrap();
+        let state = AppState::new_with_secret(db_conn, Some("test_secret"));
+
+        let mut headers = HeaderMap::new();
+        headers.insert("Authorization", "Bearer test_secret".parse().unwrap());
+
+        let payload = Bytes::from_static(b"{\"force\": true}");
+        let res = handle_webhook_sync(headers, State(state), payload).await;
+        assert!(res.is_ok());
     }
 }
