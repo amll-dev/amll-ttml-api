@@ -375,7 +375,11 @@ async fn lyrics_list_cursor_pagination_walks_whole_set() {
     let next_cursor = &body[start..end];
 
     // 第 2 页：通过 cursor 访问下一页
-    let (status, body2) = get_body(&app, &format!("/v1/lyrics/list?pageSize=1&cursor={next_cursor}")).await;
+    let (status, body2) = get_body(
+        &app,
+        &format!("/v1/lyrics/list?pageSize=1&cursor={next_cursor}"),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK);
     assert!(body2.contains("test_song_one.ttml"), "{body2}");
     assert!(body2.contains(r#""hasMore":false"#), "{body2}");
@@ -385,7 +389,11 @@ async fn lyrics_list_cursor_pagination_walks_whole_set() {
     assert!(!body2.contains(r#""totalPages":"#), "{body2}");
 
     // 通过 before 别名访问同样生效
-    let (status, body_before) = get_body(&app, &format!("/v1/lyrics/list?pageSize=1&before={next_cursor}")).await;
+    let (status, body_before) = get_body(
+        &app,
+        &format!("/v1/lyrics/list?pageSize=1&before={next_cursor}"),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK);
     assert!(body_before.contains("test_song_one.ttml"), "{body_before}");
 }

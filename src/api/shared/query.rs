@@ -159,7 +159,7 @@ pub fn parse_list_query(query_str: &str) -> Result<ListQuery, AppError> {
     let mut filter = ListFilter::default();
 
     for (key, value) in form_urlencoded::parse(query_str.as_bytes()) {
-        let value = value.into_owned();
+        let value = value.replace('\0', " ");
         if value.trim().is_empty() {
             continue;
         }
@@ -332,7 +332,7 @@ fn parse_query_internal(query_str: &str, dialect: &SearchDialect) -> ParsedQuery
     let mut page_size_raw: Option<String> = None;
 
     for (k, v) in form_urlencoded::parse(query_str.as_bytes()) {
-        let val = v.into_owned();
+        let val = v.replace('\0', " ");
         if val.trim().is_empty() {
             continue;
         }
@@ -413,7 +413,7 @@ pub fn parse_get_query(query_str: &str) -> Result<GetQuery, AppError> {
     let mut format = String::from("ttml");
 
     for (k, v) in form_urlencoded::parse(query_str.as_bytes()) {
-        let val = v.into_owned();
+        let val = v.replace('\0', " ");
         if val.trim().is_empty() {
             continue;
         }
@@ -886,7 +886,8 @@ mod tests {
 
     #[test]
     fn list_query_rejects_cursor_with_non_created_at_sort() {
-        let err = parse_list_query("sort=musicName&cursor=1768754400682_699269132670751").unwrap_err();
+        let err =
+            parse_list_query("sort=musicName&cursor=1768754400682_699269132670751").unwrap_err();
         assert!(matches!(err, AppError::BadRequest(_)));
 
         let err = parse_list_query("sort=id&cursor=1768754400682_699269132670751").unwrap_err();
@@ -1143,5 +1144,36 @@ mod tests {
         let result = parse_get_query("id=12345&ncmMusicId=111").unwrap();
         assert_eq!(result.id_query.id, Some(LyricId::from_u64(12345).unwrap()));
         assert_eq!(result.id_query.ncm_music_ids, vec!["111"]);
+    }
+
+    #[test]
+    fn search_query_null_bytes_replaced_with_spaces() {
+        let (query, _) = parse_search_query(
+            "q=Kanye+West%00Travis+Scott%00Future",
+            &NATIVE_SEARCH_DIALECT,
+        )
+        .unwrap();
+        assert_eq!(
+            query.global_keyword.as_deref(),
+            Some("Kanye West Travis Scott Future")
+        );
+    }
+
+    #[test]
+    fn search_query_null_bytes_only_skipped() {
+        let result = parse_search_query("q=%00%00", &NATIVE_SEARCH_DIALECT);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn list_query_null_bytes_replaced_with_spaces() {
+        let query = parse_list_query("authorUsername=foo%00bar").unwrap();
+        assert_eq!(query.filter.author_username.as_deref(), Some("foo bar"));
+    }
+
+    #[test]
+    fn get_query_null_bytes_replaced_with_spaces() {
+        let result = parse_get_query("appleMusicId=123%00456").unwrap();
+        assert_eq!(result.id_query.apple_music_ids, vec!["123 456"]);
     }
 }
