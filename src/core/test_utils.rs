@@ -48,3 +48,24 @@ pub fn make_song(
             .collect(),
     }
 }
+
+/// `make_song` 的位置参数已经够多，其余标识字段一律走这些链式方法按需补齐
+impl SongEntry {
+    #[must_use]
+    pub fn with_qq_music_ids(mut self, ids: &[&str]) -> Self {
+        self.qq_music_ids = ids.iter().map(|s| CompactString::new(*s)).collect();
+        self
+    }
+
+    #[must_use]
+    pub fn with_apple_music_ids(mut self, ids: &[&str]) -> Self {
+        self.apple_music_ids = ids.iter().map(|s| CompactString::new(*s)).collect();
+        self
+    }
+
+    #[must_use]
+    pub fn with_isrcs(mut self, isrcs: &[&str]) -> Self {
+        self.isrcs = isrcs.iter().map(|s| CompactString::new(*s)).collect();
+        self
+    }
+}

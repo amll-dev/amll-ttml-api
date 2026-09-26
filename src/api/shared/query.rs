@@ -3,6 +3,15 @@ use url::form_urlencoded;
 use crate::core::{
     LyricId,
     error::AppError,
+    list_query::{
+        Cursor,
+        IdKind,
+        IdKindSet,
+        ListFilter,
+        ListOrder,
+        ListQuery,
+        ListSort,
+    },
     models::{
         IdQuery,
         SearchQuery,
@@ -115,6 +124,196 @@ pub fn parse_search_query_exact(
     }
 
     Ok(parsed.query)
+}
+
+/// `/v1/lyrics/list` 的 `hasId` / `missingId` 取值映射
+///
+/// 取值与 `/v1/lyrics/get` 的平台 ID 参数同名，两处指的是同一批标识
+static ID_KIND_MAP: &[(&str, IdKind)] = &[
+    ("ncmMusicId", IdKind::NcmMusicId),
+    ("qqMusicId", IdKind::QqMusicId),
+    ("appleMusicId", IdKind::AppleMusicId),
+    ("spotifyId", IdKind::SpotifyId),
+    ("isrc", IdKind::Isrc),
+];
+
+/// 报错消息里的取值清单，与 `sort` / `order` 一样硬编码
+const ID_KIND_VALUES: &str = "'ncmMusicId', 'qqMusicId', 'appleMusicId', 'spotifyId', or 'isrc'";
+
+/// 解析列表端点查询参数：分页、排序与结构化过滤
+///
+/// 列表端点不接受检索条件，无法识别的参数会被忽略。`sort` 默认使用 `createdAt`，`order` 默认使用
+/// `desc`
+///
+/// 过滤维度之间、以及 `hasId` / `missingId` 各自的多个取值之间，全部是 AND
+#[expect(clippy::too_many_lines)]
+pub fn parse_list_query(query_str: &str) -> Result<ListQuery, AppError> {
+    let mut page_raw: Option<String> = None;
+    let mut page_size_raw: Option<String> = None;
+    let mut sort_raw: Option<String> = None;
+    let mut order_raw: Option<String> = None;
+    let mut cursor_raw: Option<String> = None;
+    let mut before_raw: Option<String> = None;
+    let mut since_raw: Option<String> = None;
+    let mut until_raw: Option<String> = None;
+    let mut filter = ListFilter::default();
+
+    for (key, value) in form_urlencoded::parse(query_str.as_bytes()) {
+        let value = value.into_owned();
+        if value.trim().is_empty() {
+            continue;
+        }
+
+        match key.as_ref() {
+            "page" => page_raw = Some(value),
+            "pageSize" => page_size_raw = Some(value),
+            "sort" => sort_raw = Some(value),
+            "order" => order_raw = Some(value),
+            "cursor" => cursor_raw = Some(value),
+            "before" => before_raw = Some(value),
+            "since" => since_raw = Some(value),
+            "until" => until_raw = Some(value),
+            "authorId" => filter.author_id = Some(value),
+            "authorUsername" => filter.author_username = Some(value),
+            "hasId" => collect_id_kinds("hasId", &value, &mut filter.has)?,
+            "missingId" => collect_id_kinds("missingId", &value, &mut filter.missing)?,
+            _ => {}
+        }
+    }
+
+    let cursor_str = match (cursor_raw, before_raw) {
+        (Some(c), Some(b)) if c != b => {
+            return Err(AppError::BadRequest(
+                "'cursor' and 'before' cannot both be specified with different values.".into(),
+            ));
+        }
+        (Some(c), _) => Some(c),
+        (None, Some(b)) => Some(b),
+        (None, None) => None,
+    };
+
+    if page_raw.is_some() && cursor_str.is_some() {
+        return Err(AppError::BadRequest(
+            "'page' and 'cursor' cannot be used together.".into(),
+        ));
+    }
+
+    let overlap = filter.has.intersection(filter.missing);
+    if !overlap.is_empty() {
+        return Err(AppError::BadRequest(format!(
+            "'hasId' and 'missingId' must not overlap, but both list {}.",
+            format_id_kinds(overlap)
+        )));
+    }
+
+    let since = match since_raw.as_deref().map(str::trim) {
+        Some(s) if !s.is_empty() => Some(s.parse::<u64>().map_err(|_| {
+            AppError::BadRequest(format!(
+                "'since' must be a valid positive integer timestamp, got '{s}'."
+            ))
+        })?),
+        _ => None,
+    };
+    let until = match until_raw.as_deref().map(str::trim) {
+        Some(s) if !s.is_empty() => Some(s.parse::<u64>().map_err(|_| {
+            AppError::BadRequest(format!(
+                "'until' must be a valid positive integer timestamp, got '{s}'."
+            ))
+        })?),
+        _ => None,
+    };
+
+    if let (Some(s), Some(u)) = (since, until)
+        && s > u
+    {
+        return Err(AppError::BadRequest(format!(
+            "'since' ({s}) must not be greater than 'until' ({u})."
+        )));
+    }
+
+    filter.since = since;
+    filter.until = until;
+
+    let pagination = Pagination::from_raw(page_raw.as_deref(), page_size_raw.as_deref())?;
+    let sort = match sort_raw.as_deref().map(str::trim) {
+        None => ListSort::default(),
+        Some("createdAt") => ListSort::CreatedAt,
+        Some("id") => ListSort::Id,
+        Some("musicName") => ListSort::TrackName,
+        Some("artistName") => ListSort::ArtistName,
+        Some("albumName") => ListSort::AlbumName,
+        Some(value) => {
+            return Err(AppError::BadRequest(format!(
+                "'sort' must be one of 'createdAt', 'id', 'musicName', 'artistName', or 'albumName', got '{value}'."
+            )));
+        }
+    };
+    let order = match order_raw.as_deref().map(str::trim) {
+        None => ListOrder::default(),
+        Some("desc") => ListOrder::Desc,
+        Some("asc") => ListOrder::Asc,
+        Some(value) => {
+            return Err(AppError::BadRequest(format!(
+                "'order' must be either 'desc' or 'asc', got '{value}'."
+            )));
+        }
+    };
+
+    let cursor = match cursor_str {
+        Some(ref s) => {
+            if sort != ListSort::CreatedAt {
+                return Err(AppError::BadRequest(
+                    "Cursor pagination is only supported with 'sort=createdAt'.".into(),
+                ));
+            }
+            Some(Cursor::parse(s)?)
+        }
+        None => None,
+    };
+
+    Ok(ListQuery {
+        pagination,
+        cursor,
+        sort,
+        order,
+        filter,
+    })
+}
+
+/// 把一个 `hasId` / `missingId` 的值按逗号切开并并入 `set`
+///
+/// 逗号分隔（`hasId=ncmMusicId,isrc`）与重复传参（`hasId=ncmMusicId&hasId=isrc`）可以混用，
+/// token 取并集。空 token 跳过，因此 `hasId=,` 与没传等价
+fn collect_id_kinds(param: &str, value: &str, set: &mut IdKindSet) -> Result<(), AppError> {
+    for token in value.split(',') {
+        let token = token.trim();
+        if token.is_empty() {
+            continue;
+        }
+
+        let kind = ID_KIND_MAP
+            .iter()
+            .find(|(name, _)| *name == token)
+            .map(|&(_, kind)| kind)
+            .ok_or_else(|| {
+                AppError::BadRequest(format!(
+                    "'{param}' must be one of {ID_KIND_VALUES}, got '{token}'."
+                ))
+            })?;
+        set.insert(kind);
+    }
+
+    Ok(())
+}
+
+/// 按 [`ID_KIND_MAP`] 的顺序把集合渲染回对外取值名，用于报错消息
+fn format_id_kinds(set: IdKindSet) -> String {
+    ID_KIND_MAP
+        .iter()
+        .filter(|&&(_, kind)| set.contains(kind))
+        .map(|(name, _)| format!("'{name}'"))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 struct ParsedQueryParams {
@@ -409,6 +608,326 @@ mod tests {
     fn native_search_invalid_page_size_returns_error() {
         let result = parse_search_query("q=hello&pageSize=200", &NATIVE_SEARCH_DIALECT);
         assert!(result.is_err());
+    }
+
+    // --- 仅分页（列表端点）测试组 ---
+
+    #[test]
+    fn pagination_only_no_params_uses_defaults() {
+        // 与 parse_search_query 的关键差异：列表端点不带查询串也是合法请求
+        let pagination = parse_list_query("").unwrap().pagination;
+        assert_eq!(pagination, Pagination::default());
+        assert_eq!(pagination.page, 1);
+        assert_eq!(pagination.page_size, 50);
+    }
+
+    #[test]
+    fn pagination_only_page_and_page_size_parsed() {
+        let pagination = parse_list_query("page=2&pageSize=10").unwrap().pagination;
+        assert_eq!(pagination.page, 2);
+        assert_eq!(pagination.page_size, 10);
+    }
+
+    #[test]
+    fn pagination_only_empty_values_fall_back_to_defaults() {
+        let pagination = parse_list_query("page=&pageSize=").unwrap().pagination;
+        assert_eq!(pagination, Pagination::default());
+    }
+
+    #[test]
+    fn pagination_only_search_params_are_ignored() {
+        // 列表端点不接受检索条件，混进来的搜索参数既不生效也不报错
+        let pagination = parse_list_query("musicName=ME!&q=hello&page=3")
+            .unwrap()
+            .pagination;
+        assert_eq!(pagination.page, 3);
+        assert_eq!(pagination.page_size, 50);
+    }
+
+    #[test]
+    fn pagination_only_rejects_zero_page() {
+        let result = parse_list_query("page=0");
+        assert!(matches!(result, Err(AppError::BadRequest(_))));
+    }
+
+    #[test]
+    fn pagination_only_rejects_non_numeric_page() {
+        let result = parse_list_query("page=abc");
+        assert!(matches!(result, Err(AppError::BadRequest(_))));
+    }
+
+    #[test]
+    fn pagination_only_rejects_oversized_page_size() {
+        let result = parse_list_query("pageSize=101");
+        assert!(matches!(result, Err(AppError::BadRequest(_))));
+    }
+
+    #[test]
+    fn list_query_defaults_sort_and_order() {
+        let query = parse_list_query("").unwrap();
+        assert_eq!(query.sort, ListSort::CreatedAt);
+        assert_eq!(query.order, ListOrder::Desc);
+    }
+
+    #[test]
+    fn list_query_parses_all_sort_values() {
+        for (raw, expected) in [
+            ("createdAt", ListSort::CreatedAt),
+            ("id", ListSort::Id),
+            ("musicName", ListSort::TrackName),
+            ("artistName", ListSort::ArtistName),
+            ("albumName", ListSort::AlbumName),
+        ] {
+            assert_eq!(
+                parse_list_query(&format!("sort={raw}")).unwrap().sort,
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn list_query_rejects_invalid_sort_and_order() {
+        assert!(matches!(
+            parse_list_query("sort=created_at"),
+            Err(AppError::BadRequest(_))
+        ));
+        assert!(matches!(
+            parse_list_query("order=down"),
+            Err(AppError::BadRequest(_))
+        ));
+    }
+
+    // --- 列表端点结构化过滤测试组 ---
+
+    #[test]
+    fn list_query_has_no_filter_by_default() {
+        assert!(
+            parse_list_query("page=2&sort=id")
+                .unwrap()
+                .filter
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn list_query_parses_author_filters() {
+        let filter = parse_list_query("authorId=12345&authorUsername=someone")
+            .unwrap()
+            .filter;
+        assert_eq!(filter.author_id.as_deref(), Some("12345"));
+        assert_eq!(filter.author_username.as_deref(), Some("someone"));
+        assert!(filter.has.is_empty());
+        assert!(filter.missing.is_empty());
+    }
+
+    #[test]
+    fn list_query_keeps_author_values_verbatim() {
+        // 与 /lyrics/search 的作者参数保持一致：不 trim、不改大小写，原样交给倒排索引比对
+        let filter = parse_list_query("authorId=+Someone+&authorUsername=SomeOne")
+            .unwrap()
+            .filter;
+        assert_eq!(filter.author_id.as_deref(), Some(" Someone "));
+        assert_eq!(filter.author_username.as_deref(), Some("SomeOne"));
+    }
+
+    #[test]
+    fn list_query_repeated_author_param_keeps_last() {
+        let filter = parse_list_query("authorId=first&authorId=second")
+            .unwrap()
+            .filter;
+        assert_eq!(filter.author_id.as_deref(), Some("second"));
+    }
+
+    #[test]
+    fn list_query_parses_all_id_kind_values() {
+        for &(raw, kind) in ID_KIND_MAP {
+            let filter = parse_list_query(&format!("hasId={raw}")).unwrap().filter;
+            assert!(filter.has.contains(kind), "hasId={raw} 未解析出 {kind:?}");
+            assert!(filter.missing.is_empty());
+
+            let filter = parse_list_query(&format!("missingId={raw}"))
+                .unwrap()
+                .filter;
+            assert!(
+                filter.missing.contains(kind),
+                "missingId={raw} 未解析出 {kind:?}"
+            );
+            assert!(filter.has.is_empty());
+        }
+    }
+
+    #[test]
+    fn list_query_comma_and_repeated_id_forms_agree() {
+        let comma = parse_list_query("hasId=ncmMusicId,isrc").unwrap().filter;
+        let repeated = parse_list_query("hasId=ncmMusicId&hasId=isrc")
+            .unwrap()
+            .filter;
+        let mixed = parse_list_query("hasId=ncmMusicId,isrc&hasId=isrc")
+            .unwrap()
+            .filter;
+
+        assert_eq!(comma.has, repeated.has);
+        assert_eq!(comma.has, mixed.has);
+        assert!(comma.has.contains(IdKind::NcmMusicId));
+        assert!(comma.has.contains(IdKind::Isrc));
+        assert!(!comma.has.contains(IdKind::SpotifyId));
+    }
+
+    #[test]
+    fn list_query_ignores_blank_id_filters() {
+        for raw in ["hasId=", "hasId=+", "hasId=,", "missingId=,+,"] {
+            let filter = parse_list_query(raw).unwrap().filter;
+            assert!(filter.is_empty(), "{raw} 应当等同于没传");
+        }
+    }
+
+    #[test]
+    fn list_query_rejects_unknown_id_kind() {
+        let err = parse_list_query("hasId=ncm").unwrap_err();
+        let AppError::BadRequest(message) = err else {
+            panic!("未知取值应当是 400");
+        };
+        assert!(message.contains("'hasId'"), "{message}");
+        assert!(message.contains("got 'ncm'"), "{message}");
+
+        assert!(matches!(
+            parse_list_query("hasId=ncmMusicId,nope"),
+            Err(AppError::BadRequest(_))
+        ));
+        assert!(matches!(
+            parse_list_query("missingId=platform"),
+            Err(AppError::BadRequest(_))
+        ));
+    }
+
+    #[test]
+    fn list_query_rejects_overlapping_has_and_missing() {
+        let err = parse_list_query("hasId=ncmMusicId,isrc&missingId=isrc,spotifyId").unwrap_err();
+        let AppError::BadRequest(message) = err else {
+            panic!("hasId 与 missingId 相交应当是 400");
+        };
+        // 只报真正相交的那个取值，另外两个各自只出现在一侧，不算冲突
+        assert!(message.contains("'isrc'"), "{message}");
+        assert!(!message.contains("'ncmMusicId'"), "{message}");
+        assert!(!message.contains("'spotifyId'"), "{message}");
+    }
+
+    #[test]
+    fn list_query_allows_disjoint_has_and_missing() {
+        let filter = parse_list_query("hasId=ncmMusicId&missingId=isrc")
+            .unwrap()
+            .filter;
+        assert!(filter.has.contains(IdKind::NcmMusicId));
+        assert!(filter.missing.contains(IdKind::Isrc));
+    }
+
+    #[test]
+    fn id_kind_message_values_match_map() {
+        assert_eq!(ID_KIND_MAP.len(), IdKind::ALL.len());
+
+        for kind in IdKind::ALL {
+            let names: Vec<&str> = ID_KIND_MAP
+                .iter()
+                .filter(|&&(_, mapped)| mapped == kind)
+                .map(|&(name, _)| name)
+                .collect();
+            assert_eq!(names.len(), 1, "{kind:?} 的对外取值应当唯一");
+            assert!(
+                ID_KIND_VALUES.contains(&format!("'{}'", names[0])),
+                "报错消息的取值清单里缺少 {kind:?}"
+            );
+        }
+    }
+
+    // --- 列表端点游标与增量分页测试组 ---
+
+    #[test]
+    fn list_query_parses_cursor() {
+        let query = parse_list_query("cursor=1768754400682_699269132670751").unwrap();
+        let cursor = query.cursor.unwrap();
+        assert_eq!(cursor.timestamp, 1_768_754_400_682);
+        assert_eq!(cursor.id.get(), 699_269_132_670_751);
+    }
+
+    #[test]
+    fn list_query_parses_before_as_cursor_alias() {
+        let query = parse_list_query("before=1768754400682_699269132670751").unwrap();
+        let cursor = query.cursor.unwrap();
+        assert_eq!(cursor.timestamp, 1_768_754_400_682);
+        assert_eq!(cursor.id.get(), 699_269_132_670_751);
+    }
+
+    #[test]
+    fn list_query_allows_identical_cursor_and_before() {
+        let query = parse_list_query(
+            "cursor=1768754400682_699269132670751&before=1768754400682_699269132670751",
+        )
+        .unwrap();
+        assert!(query.cursor.is_some());
+    }
+
+    #[test]
+    fn list_query_rejects_conflicting_cursor_and_before() {
+        let err = parse_list_query(
+            "cursor=1768754400682_699269132670751&before=1768754400682_111111111111111",
+        )
+        .unwrap_err();
+        assert!(matches!(err, AppError::BadRequest(_)));
+    }
+
+    #[test]
+    fn list_query_rejects_page_with_cursor() {
+        let err = parse_list_query("page=2&cursor=1768754400682_699269132670751").unwrap_err();
+        assert!(matches!(err, AppError::BadRequest(_)));
+
+        let err = parse_list_query("page=1&before=1768754400682_699269132670751").unwrap_err();
+        assert!(matches!(err, AppError::BadRequest(_)));
+    }
+
+    #[test]
+    fn list_query_rejects_cursor_with_non_created_at_sort() {
+        let err = parse_list_query("sort=musicName&cursor=1768754400682_699269132670751").unwrap_err();
+        assert!(matches!(err, AppError::BadRequest(_)));
+
+        let err = parse_list_query("sort=id&cursor=1768754400682_699269132670751").unwrap_err();
+        assert!(matches!(err, AppError::BadRequest(_)));
+    }
+
+    #[test]
+    fn list_query_rejects_malformed_cursor() {
+        assert!(matches!(
+            parse_list_query("cursor=abc"),
+            Err(AppError::BadRequest(_))
+        ));
+        assert!(matches!(
+            parse_list_query("cursor=123_"),
+            Err(AppError::BadRequest(_))
+        ));
+    }
+
+    #[test]
+    fn list_query_parses_since_and_until() {
+        let query = parse_list_query("since=1000&until=2000").unwrap();
+        assert_eq!(query.filter.since, Some(1000));
+        assert_eq!(query.filter.until, Some(2000));
+    }
+
+    #[test]
+    fn list_query_rejects_since_greater_than_until() {
+        let err = parse_list_query("since=2000&until=1000").unwrap_err();
+        assert!(matches!(err, AppError::BadRequest(_)));
+    }
+
+    #[test]
+    fn list_query_rejects_invalid_since_or_until() {
+        assert!(matches!(
+            parse_list_query("since=invalid"),
+            Err(AppError::BadRequest(_))
+        ));
+        assert!(matches!(
+            parse_list_query("until=invalid"),
+            Err(AppError::BadRequest(_))
+        ));
     }
 
     // --- LRCLIB Search 测试组 ---

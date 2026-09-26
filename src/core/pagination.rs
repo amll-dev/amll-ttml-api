@@ -1,3 +1,4 @@
+use compact_str::CompactString;
 use serde::Serialize;
 
 use crate::core::error::AppError;
@@ -95,14 +96,18 @@ fn parse_positive(raw: &str, field: &str) -> Result<u64, AppError> {
     Ok(value)
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PaginationInfo {
-    pub page: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub page: Option<u64>,
     pub page_size: u64,
     pub total: u64,
-    pub total_pages: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total_pages: Option<u64>,
     pub has_more: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<CompactString>,
 }
 
 /// 分页组合器输出结果，包含当前页的切片数据与完整的分页元数据信息
@@ -132,11 +137,12 @@ where
     Paginated {
         items: paged_items,
         pagination: PaginationInfo {
-            page: pagination.page,
+            page: Some(pagination.page),
             page_size: pagination.page_size,
             total,
-            total_pages: pagination.total_pages(total),
+            total_pages: Some(pagination.total_pages(total)),
             has_more: pagination.has_more(total),
+            next_cursor: None,
         },
     }
 }
@@ -230,10 +236,30 @@ mod tests {
             paginated.items,
             vec![22, 24, 26, 28, 30, 32, 34, 36, 38, 40]
         );
-        assert_eq!(paginated.pagination.page, 2);
+        assert_eq!(paginated.pagination.page, Some(2));
         assert_eq!(paginated.pagination.page_size, 10);
         assert_eq!(paginated.pagination.total, 25);
-        assert_eq!(paginated.pagination.total_pages, 3);
+        assert_eq!(paginated.pagination.total_pages, Some(3));
         assert!(paginated.pagination.has_more);
+        assert!(paginated.pagination.next_cursor.is_none());
+    }
+
+    #[test]
+    fn pagination_info_cursor_mode_serialization() {
+        let info = PaginationInfo {
+            page: None,
+            page_size: 50,
+            total: 100,
+            total_pages: None,
+            has_more: true,
+            next_cursor: Some("1768754400682_699269132670751".into()),
+        };
+        let json = serde_json::to_value(&info).unwrap();
+        assert!(json.get("page").is_none());
+        assert!(json.get("totalPages").is_none());
+        assert_eq!(json["pageSize"], 50);
+        assert_eq!(json["total"], 100);
+        assert_eq!(json["hasMore"], true);
+        assert_eq!(json["nextCursor"], "1768754400682_699269132670751");
     }
 }

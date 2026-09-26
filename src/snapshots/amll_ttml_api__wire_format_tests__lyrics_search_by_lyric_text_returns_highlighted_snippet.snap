@@ -2,4 +2,4 @@
 source: src/wire_format_tests.rs
 expression: body
 ---
-{"status":200,"data":{"items":[{"id":699269132670751,"filename":"test_song_one.ttml","musicNames":["Test Song One"],"artistNames":["Artist Alpha"],"albumNames":[],"ncmMusicIds":["1001"],"qqMusicIds":[],"appleMusicIds":[],"spotifyIds":["sp1001"],"isrcs":[],"authorIds":[],"authorUsernames":[],"matchContext":{"snippet":"<mark>Hello</mark> World Lyric"}}],"pagination":{"page":1,"pageSize":50,"total":1,"totalPages":1,"hasMore":false}}}
+{"status":200,"data":{"items":[{"id":699269132670751,"filename":"test_song_one.ttml","createdAt":1689087424000,"musicNames":["Test Song One"],"artistNames":["Artist Alpha"],"albumNames":[],"ncmMusicIds":["1001"],"qqMusicIds":[],"appleMusicIds":[],"spotifyIds":["sp1001"],"isrcs":["USRC17607839"],"authorIds":["108002475"],"authorUsernames":["alpha_author"],"matchContext":{"snippet":"<mark>Hello</mark> World Lyric"}}],"pagination":{"page":1,"pageSize":50,"total":1,"totalPages":1,"hasMore":false}}}

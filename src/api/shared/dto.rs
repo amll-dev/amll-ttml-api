@@ -30,6 +30,11 @@ use crate::{
 pub struct SongItem {
     pub id: LyricId,
     pub filename: String,
+    /// 本条歌词条目的创建时刻，Unix epoch 毫秒
+    ///
+    /// 由上游 CI 处理投稿时生成并编码进文件名前缀，同一文件恒定。
+    /// 它既不是合并进词库的时刻（两者可能相隔数月），也不是歌曲本身的发行日期
+    pub created_at: u64,
 
     pub music_names: Box<[CompactString]>,
     pub artist_names: Box<[CompactString]>,
@@ -182,6 +187,7 @@ pub fn map_song_to_item(
     SongItem {
         id: song.id,
         filename: song.filename.to_string(),
+        created_at: song.timestamp,
         music_names: song.track_names.clone(),
         artist_names: song.artist_names.clone(),
         album_names: song.album_names.clone(),
@@ -241,17 +247,45 @@ mod tests {
     }
 
     #[test]
+    fn created_at_serializes_as_epoch_millis_number() {
+        let filename = "1768754400682-250306205-r6IrpmBd.ttml";
+        let song = SongEntry {
+            id: LyricId::from_filename(filename),
+            filename: CompactString::new(filename),
+            timestamp: 1_768_754_400_682,
+            track_names: Box::default(),
+            artist_names: Box::default(),
+            album_names: Box::default(),
+            normalized_track_names: Box::default(),
+            normalized_artist_names: Box::default(),
+            normalized_album_names: Box::default(),
+            ncm_music_ids: Box::default(),
+            qq_music_ids: Box::default(),
+            apple_music_ids: Box::default(),
+            spotify_ids: Box::default(),
+            isrcs: Box::default(),
+            author_ids: Box::default(),
+            author_usernames: Box::default(),
+        };
+
+        let json = serde_json::to_value(map_song_to_item(&song, None, None, None)).unwrap();
+        assert_eq!(json["createdAt"], 1_768_754_400_682_u64);
+        assert!(json.get("timestamp").is_none());
+    }
+
+    #[test]
     fn search_data_serialization_includes_nested_pagination() {
         let response = SuccessResponse {
             status: HttpOk,
             data: SearchData {
                 items: vec![],
                 pagination: PaginationInfo {
-                    page: 1,
+                    page: Some(1),
                     page_size: 20,
                     total: 156,
-                    total_pages: 8,
+                    total_pages: Some(8),
                     has_more: true,
+                    next_cursor: None,
                 },
             },
         };

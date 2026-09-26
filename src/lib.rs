@@ -42,6 +42,7 @@ pub fn create_app(state: AppState) -> Router {
         .route("/version", get(api::status::handler::handle_status))
         .route("/lyrics/get", get(api::get::handler::handle_get))
         .route("/lyrics/search", get(api::search::handler::handle_search))
+        .route("/lyrics/list", get(api::list::handler::handle_list))
         .route("/lrclib/search", get(api::lrclib::handler::handle_search))
         .route("/lrclib/get", get(api::lrclib::handler::handle_get))
         .route(

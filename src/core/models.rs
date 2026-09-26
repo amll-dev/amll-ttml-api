@@ -3,7 +3,13 @@ use std::collections::HashMap;
 use compact_str::CompactString;
 use serde::Deserialize;
 
-use crate::core::LyricId;
+use crate::core::{
+    LyricId,
+    list_query::{
+        IdKind,
+        IdKindSet,
+    },
+};
 
 #[derive(Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -35,6 +41,28 @@ pub struct SongEntry {
 
     pub author_ids: Box<[CompactString]>,
     pub author_usernames: Box<[CompactString]>,
+}
+
+impl SongEntry {
+    /// 本条目实际携带了哪些外部标识，供 `/lyrics/list` 的 `hasId` / `missingId` 过滤判定
+    ///
+    /// 判据是「对外响应里那个数组非空」，与客户端看到的 `ncmMusicIds` 等字段一致
+    #[must_use]
+    pub fn present_id_kinds(&self) -> IdKindSet {
+        let mut set = IdKindSet::empty();
+        for (kind, ids) in [
+            (IdKind::NcmMusicId, &self.ncm_music_ids),
+            (IdKind::QqMusicId, &self.qq_music_ids),
+            (IdKind::AppleMusicId, &self.apple_music_ids),
+            (IdKind::SpotifyId, &self.spotify_ids),
+            (IdKind::Isrc, &self.isrcs),
+        ] {
+            if !ids.is_empty() {
+                set.insert(kind);
+            }
+        }
+        set
+    }
 }
 
 #[derive(Default)]

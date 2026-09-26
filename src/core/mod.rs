@@ -1,5 +1,6 @@
 pub mod db;
 pub mod error;
+pub mod list_query;
 pub mod lyric_id;
 pub mod matcher;
 pub mod models;

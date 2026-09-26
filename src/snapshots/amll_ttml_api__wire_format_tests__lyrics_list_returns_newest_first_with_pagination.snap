@@ -1,0 +1,5 @@
+---
+source: src/wire_format_tests.rs
+expression: body
+---
+{"status":200,"data":{"items":[{"id":5440178231786117,"filename":"test_song_two.ttml","createdAt":1787382687321,"musicNames":["Test Song Two"],"artistNames":["Artist Beta"],"albumNames":[],"ncmMusicIds":["1002"],"qqMusicIds":["qq1002"],"appleMusicIds":[],"spotifyIds":["sp1002"],"isrcs":[],"authorIds":["330521690"],"authorUsernames":["beta_author"]},{"id":699269132670751,"filename":"test_song_one.ttml","createdAt":1689087424000,"musicNames":["Test Song One"],"artistNames":["Artist Alpha"],"albumNames":[],"ncmMusicIds":["1001"],"qqMusicIds":[],"appleMusicIds":[],"spotifyIds":["sp1001"],"isrcs":["USRC17607839"],"authorIds":["108002475"],"authorUsernames":["alpha_author"]}],"pagination":{"page":1,"pageSize":50,"total":2,"totalPages":1,"hasMore":false}}}

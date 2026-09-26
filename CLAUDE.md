@@ -91,6 +91,9 @@ lib.rs 路由 → api/<模块>/extractor.rs → api/<模块>/handler.rs → serv
 
 - `extractor.rs` 从 `RawQuery` 解析查询串，由 `api::shared::query`（`NATIVE_SEARCH_DIALECT` / `LRCLIB_SEARCH_DIALECT` / `LRCLIB_GET_DIALECT` 数据表）驱动，负责参数校验、别名映射、`q` 查询降级与分页提取。
   例如 `search` 里同时传 `q` 和具体字段时会丢弃 `q`；`get` 的优先级是 `id` > `filename` > 平台 ID 交集。
+  例外是 `list`：它不做模糊检索，因此不走 dialect 数据表，直接用 `parse_list_query` 取分页、排序、排序方向与结构化过滤条件。
+  注意 `parse_search_query` 在无检索参数时返回 400，且 `page` / `pageSize` 不计入 `has_any_param`，
+  所以「只带分页参数」的请求在搜索端点上是 400——列表端点必须走自己的解析路径，不能复用。
 - `handler.rs` 保持极薄，只做「提参 → 调 service → 映射 DTO → 包装响应」。
   原生端点（`/lyrics/*`）经 `ApiSuccess<T>`（`api/shared/dto.rs`）自动附加
   `{"status": 200, "data": ...}` 信封，与错误侧 `AppError` 的 `IntoResponse` 对称
@@ -118,17 +121,44 @@ lib.rs 路由 → api/<模块>/extractor.rs → api/<模块>/handler.rs → serv
 中日文匹配依赖 `core/matcher/normalize.rs` 里的 OpenCC 繁简转换（`convert_tw2s`），
 入库时和查询时都会归一化，改动其中一侧必须同步另一侧，否则已有数据会失配。
 
+### 列表与结构化过滤
+
+`GET /v1/lyrics/list` 是 `search` 的对立面：不打分、不模糊匹配，只做**确定性过滤 + 排序 + 分页**，
+契约类型全在 `core/list_query.rs`（`ListQuery` / `ListSort` / `ListOrder` / `ListFilter` / `IdKind` / `IdKindSet` / `Cursor`）。
+
+- **对外参数**：`authorId` / `authorUsername` 精确且大小写敏感（与 `/lyrics/search` 一致），重复传后者覆盖；
+  `hasId` / `missingId` 取值域是 `ncmMusicId` `qqMusicId` `appleMusicId` `spotifyId` `isrc`，
+  刻意与 `/lyrics/get` 的平台 ID 参数同名，支持逗号分隔与重复传参混用（token 取并集）。
+  `since` / `until` 筛选条目创建时间区间（Unix epoch 毫秒数，`since > until` 报 400）。
+  **所有维度之间、以及多值之间全部是 AND**；取值不在枚举内、或 `hasId` 与 `missingId` 撞值均为 400。
+  过滤后无结果是 `200` + `items: []` + `total: 0`，不是 404。
+- **`IdKindSet(u8)` 位掩码**：把「条目实际携带」（`SongEntry::present_id_kinds`，判据是对外响应里那个数组非空）、
+  「必须有」、「必须缺」三种语义归约到同一个 5 位掩码，判定退化为 `contains_all` / `contains_none` 两次位运算，
+  冲突检测退化为一次 `intersection`。对外取值字符串**不**在 core 里，映射表 `ID_KIND_MAP` 与
+  报错文案 `ID_KIND_VALUES` 同居 `api/shared/query.rs`，由 `id_kind_message_values_match_map` 守住两者不漂移。
+- **`LyricIndexDB::list_candidates`** 走混合路径：作者维度有倒排索引，先用它把候选集缩小；
+  `hasId` / `missingId` / `since` / `until` 选择性各异，在候选集上逐条比对。
+  索引里查不到的作者是**空候选**而非「该条件不生效」，否则两个作者参数同时传时 AND 会失效
+  （`search_by_fields` 就有这个 bug，`list_candidates` 刻意不继承，由测试守住）。返回顺序不保证，排序由调用方负责。
+- **游标分页与增量同步**：
+  - 针对词库镜像遍历，支持 `cursor=<timestamp>_<id>`（及别名 `before`），通过 `partition_point` 二分精确定位，免疫深翻页漂移；
+  - 游标基于条目创建时刻，仅支持在 `sort=createdAt`（默认排序）下使用，与其它排序或 `page` 混用均报 400；
+  - 增量拉取可传 `since=<timestamp>`，当增量数据超过 `pageSize` 时可搭配 `cursor` 继续翻页。
+- `paginate` 的 `total` 取自迭代器 `len()`，所以「过滤后 total 自动收缩」是零成本的。
+
 ### 分页机制
 
 - **解析与校验**（`core/pagination.rs`）：由 `Pagination` 结构体处理，`page` 默认 1（从 1 起算），`pageSize` 默认 50，最大上限 100。传入 0、负数、非数字或 `pageSize` 超过 100 时返回 `400 Bad Request`；缺省或空字符串参数使用默认值。
-- **响应数据结构**（`api/shared/dto.rs`）：`SearchData` 响应结果中 `items` 与分页参数解耦，分页元数据统一放在嵌套的 `pagination: PaginationInfo` 结构体中（字段包括 `page`, `pageSize`, `total`, `totalPages`, `hasMore`）。
+- **响应数据结构**（`api/shared/dto.rs`）：`SearchData` 响应结果中 `items` 与分页参数解耦，分页元数据统一放在嵌套的 `pagination: PaginationInfo` 结构体中（字段包括 `page`, `pageSize`, `total`, `totalPages`, `hasMore`, `nextCursor`）。
+  - `page` 与 `totalPages` 在游标分页模式下省略（`None`）；
+  - `nextCursor` 仅在 `hasMore == true` 时输出，最后一页或无更多数据时省略（`None`）。
 
 ### 缓存机制与时限
 
 响应头由 `api/shared/cache.rs` 统一管理 `Cache-Control`：
 - **强唯一性歌词获取**（`GET /v1/lyrics/get?id=...` 或 `?filename=...` 及 `GET /v1/lrclib/get/{id}`）：`public, max-age=604800, s-maxage=2592000, stale-while-revalidate=2592000`（客户端 7 天 / CDN 30 天 / SWR 30 天）。
 - **模糊匹配与平台 ID 获取**（`GET /v1/lyrics/get?ncmMusicId=...` 等平台 ID 查询及 `GET /v1/lrclib/get` 歌名歌手查询）：`public, max-age=604800, s-maxage=604800, stale-while-revalidate=604800`（客户端 7 天 / CDN 7 天 / SWR 7 天）。匹配结果会随上游新增歌词而变化（近期约 2 首/天），因此任何层级都不超过 7 天新鲜期，不给 CDN 30 天那一档。
-- **歌词搜索接口**（`GET /v1/lyrics/search` 及 `GET /v1/lrclib/search`）：`public, max-age=3600, s-maxage=7200, stale-while-revalidate=1800`（客户端 1 小时 / CDN 2 小时 / SWR 30 分钟）。
+- **歌词搜索与列表接口**（`GET /v1/lyrics/search`、`GET /v1/lrclib/search` 及 `GET /v1/lyrics/list`）：`public, max-age=3600, s-maxage=7200, stale-while-revalidate=1800`（客户端 1 小时 / CDN 2 小时 / SWR 30 分钟）。
 - **404 未找到响应**（`LyricNotFound` 及未匹配路由）：`public, max-age=3600, s-maxage=7200`（客户端 1 小时 / CDN 2 小时负缓存）。
 - **服务状态与探针**（`GET /v1/status` 及 `GET /v1/version`）：`no-store`（禁止任何层级缓存，保证 uptime 与探针实时性）。
 - **进程内缓存**：`DbLyricStore` 的 `ttml_cache` 与 `formatted_lyric_cache` TTL 均为 14 天，与上面的 HTTP 时限相互独立；实际存活受下面的主动失效约束。
@@ -179,6 +209,12 @@ CORS 与 Trace 之内），为响应生成 `ETag` 并处理 `If-None-Match`，�
 
 - **ID**：`core/lyric_id.rs` 用 FNV-1a 截断到 53 位，保证 JS `Number` 可安全表示。ID 由文件名派生，
   改哈希实现会让所有已发布 ID 失效。
+- **`timestamp`**：`SongEntry.timestamp` 是**条目创建时刻的 Unix epoch 毫秒**，对外字段名为 `createdAt`。
+  它由上游文件名第一段派生（`sync_service.rs` 的 `build_entity_from_ttml`，解析失败兜底 `0`），
+  而上游的入库管线是「制作者开 issue → GitHub Actions 提取直链、规范化内容、**在此刻打戳** →
+  自动开 PR → 维护者审查 → 合并」。因此它**不是**合并进词库的时刻，两者可能相隔数月。
+  `/lyrics/list` 排出来的是「最近创建」而非「最近新增到词库」的顺序，
+  一首今天才合并的歌词可能带着几个月前的 `createdAt`。
 - **错误**：类型在 core（`AppError`），HTTP 映射在 api（`api/shared/dto.rs` 的
   `IntoResponse` 实现，输出 `ErrorResponse` 形状的 `{status, error, message}`）。
   4xx 消息面向客户端（描述其输入问题）；5xx 的内部细节进日志 / Sentry
