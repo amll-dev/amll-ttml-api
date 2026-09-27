@@ -3,6 +3,7 @@
 //! 数据流：[`middleware::record`] 采集 HTTP 层字段，handler 经 [`Annotator`] 补充命中数等业务标注
 //! → 有界 channel → 写入任务批量写入 `$ANALYTICS_DIR/buffer.db`
 //! → 转换任务按北京时间自然日转成 `$ANALYTICS_DIR/parquet/YYYY-MM-DD.parquet`，并执行保留策略
+//! → 团队经 `/v1/admin/analytics/files` 下载（`api/admin`）
 //!
 //! 由环境变量 `ANALYTICS_DIR` 控制开关，未设置时中间件根本不挂载，本地开发与测试不受影响。
 //! 统计出任何问题都不影响主服务：启动失败只关闭统计，运行期写入失败只丢数据
@@ -37,6 +38,7 @@ pub use annotation::{
     MatchKind,
 };
 use anyhow::Context;
+use chrono::NaiveDate;
 use convert::ConverterOptions;
 use hmac::KeyInit;
 pub use middleware::record;
@@ -45,6 +47,10 @@ use record::{
     RequestRecord,
 };
 use retention::RetentionPolicy;
+use sea_orm::{
+    DatabaseConnection,
+    DbErr,
+};
 use tokio::{
     sync::mpsc::{
         self,
@@ -78,6 +84,8 @@ pub struct AnalyticsConfig {
     pub dir: PathBuf,
     /// 对客户端 IP 做 HMAC 的密钥；缺失时照常记录，只是客户端标识留空
     pub ip_key: Option<Vec<u8>>,
+    /// 下载端点的 Bearer 密钥；缺失时下载端点返回 500
+    pub secret: Option<String>,
     /// 实例标识，端口与 git hash
     pub instance: String,
     pub min_free_bytes: u64,
@@ -91,6 +99,7 @@ impl AnalyticsConfig {
         Self {
             dir,
             ip_key,
+            secret: None,
             instance: format!("{port}@{}", env!("GIT_HASH")),
             min_free_bytes: DEFAULT_MIN_FREE_BYTES,
             retention_days: DEFAULT_RETENTION_DAYS,
@@ -98,7 +107,8 @@ impl AnalyticsConfig {
         }
     }
 
-    /// 从 `ANALYTICS_DIR` 与 `ANALYTICS_IP_KEY` 读取，`ANALYTICS_DIR` 未设置时返回 `None`
+    /// 从 `ANALYTICS_DIR`、`ANALYTICS_IP_KEY` 与 `ANALYTICS_SECRET` 读取，
+    /// `ANALYTICS_DIR` 未设置时返回 `None`
     #[must_use]
     pub fn from_env(port: u16) -> Option<Self> {
         let dir = non_empty_env("ANALYTICS_DIR")?;
@@ -110,11 +120,10 @@ impl AnalyticsConfig {
             );
         }
 
-        Some(Self::new(
-            PathBuf::from(dir),
-            ip_key.map(String::into_bytes),
-            port,
-        ))
+        Some(Self {
+            secret: non_empty_env("ANALYTICS_SECRET"),
+            ..Self::new(PathBuf::from(dir), ip_key.map(String::into_bytes), port)
+        })
     }
 }
 
@@ -125,13 +134,30 @@ fn non_empty_env(name: &str) -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
-/// 统计功能的请求侧句柄，随 `AppState` 浅拷贝，所有克隆共享同一个 channel
+/// 统计功能的句柄，随 `AppState` 浅拷贝，所有克隆共享同一个 channel 与连接
 #[derive(Clone)]
 pub struct Analytics {
     tx: mpsc::Sender<RequestRecord>,
     ip_hasher: Option<Arc<IpHasher>>,
     instance: Arc<str>,
     dropped: Arc<AtomicU64>,
+    /// 下载端点用：每日文件目录、与转换任务共用的连接、鉴权密钥
+    parquet_dir: Arc<PathBuf>,
+    db: DatabaseConnection,
+    secret: Option<Arc<str>>,
+}
+
+/// 一个可供下载的每日文件
+#[derive(Debug, Clone)]
+pub struct DailyFile {
+    pub name: String,
+    pub day: String,
+    pub rows: u64,
+    pub bytes: u64,
+    pub sha256: String,
+    pub first_ts: Option<i64>,
+    pub last_ts: Option<i64>,
+    pub converted_at: i64,
 }
 
 /// 后台任务的控制柄：写入任务与每日转换任务
@@ -193,8 +219,10 @@ impl Analytics {
             },
             rx,
         );
+
+        let parquet_dir = Arc::new(config.dir.join(convert::PARQUET_DIR));
         let converter = convert::spawn(ConverterOptions {
-            db: converter_db,
+            db: converter_db.clone(),
             dir: config.dir,
             instance: Arc::clone(&instance),
             retention: RetentionPolicy {
@@ -208,6 +236,9 @@ impl Analytics {
             ip_hasher,
             instance,
             dropped,
+            parquet_dir,
+            db: converter_db,
+            secret: config.secret.map(Arc::from),
         };
         Ok((analytics, AnalyticsTasks { writer, converter }))
     }
@@ -217,5 +248,48 @@ impl Analytics {
         if let Err(TrySendError::Full(_)) = self.tx.try_send(record) {
             self.dropped.fetch_add(1, Ordering::Relaxed);
         }
+    }
+
+    /// 下载端点的 Bearer 密钥
+    #[must_use]
+    pub fn secret(&self) -> Option<&str> {
+        self.secret.as_deref()
+    }
+
+    /// 可供下载的每日文件，按日期升序；已被保留策略删掉的不列出
+    pub async fn daily_files(&self) -> Result<Vec<DailyFile>, DbErr> {
+        let mut files = Vec::new();
+
+        for converted in buffer::converted_days(&self.db).await? {
+            let Some(day) = NaiveDate::parse_from_str(&converted.day, "%Y-%m-%d").ok() else {
+                continue;
+            };
+            let name = day::file_name(day);
+            if !tokio::fs::try_exists(self.parquet_dir.join(&name))
+                .await
+                .unwrap_or(false)
+            {
+                continue;
+            }
+
+            files.push(DailyFile {
+                name,
+                day: converted.day,
+                rows: converted.rows.cast_unsigned(),
+                bytes: converted.bytes.cast_unsigned(),
+                sha256: converted.sha256,
+                first_ts: converted.min_ts,
+                last_ts: converted.max_ts,
+                converted_at: converted.finished_at,
+            });
+        }
+
+        Ok(files)
+    }
+
+    /// 每日文件的路径，只接受严格符合 `YYYY-MM-DD.parquet` 的文件名，杜绝路径穿越
+    #[must_use]
+    pub fn daily_file_path(&self, name: &str) -> Option<PathBuf> {
+        day::parse_file_name(name).map(|_| self.parquet_dir.join(name))
     }
 }

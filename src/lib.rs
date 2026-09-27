@@ -68,6 +68,14 @@ pub fn create_app(state: AppState) -> Router {
         .route(
             "/webhook/sync",
             post(api::webhook::handler::handle_webhook_sync),
+        )
+        .route(
+            "/admin/analytics/files",
+            get(api::admin::handler::handle_list_files),
+        )
+        .route(
+            "/admin/analytics/files/{name}",
+            get(api::admin::handler::handle_download_file),
         );
 
     let trace_layer = TraceLayer::new_for_http()

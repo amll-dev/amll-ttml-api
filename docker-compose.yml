@@ -12,5 +12,6 @@ services:
       # - SYNC_SECRET=
       # - ANALYTICS_DIR=/data/analytics
       # - ANALYTICS_IP_KEY=
+      # - ANALYTICS_SECRET=
     volumes:
       - ./data:/data

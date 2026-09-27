@@ -1,3 +1,4 @@
+pub mod admin;
 pub mod get;
 pub mod list;
 pub mod lrclib;

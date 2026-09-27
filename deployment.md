@@ -28,12 +28,12 @@
                         ┌──────────────────────────────────────────────────────────┐
                         │   环境变量配置文件 (服务器保密): /etc/amll-ttml-api/env  │
                         │   包含: SENTRY_DSN, SYNC_SECRET, DATABASE_URL,           │
-                        │         ANALYTICS_DIR, ANALYTICS_IP_KEY                  │
+                        │         ANALYTICS_DIR, ANALYTICS_IP_KEY, ANALYTICS_SECRET│
                         └──────────────────────────────────────────────────────────┘
 ```
 
 * **无缝热更新 (Zero-Downtime)**：利用 Systemd 模板服务 (`amll-ttml-api@.service`) 在端口 3000 与 3001 之间平滑热切换，配合健康检查与 Nginx 重载，实现发布更新时用户完全零感停机。
-* **配置与代码解耦**：所有敏感密钥（`SENTRY_DSN`、`SYNC_SECRET`、`ANALYTICS_IP_KEY`）独立保存在服务器本地 `/etc/amll-ttml-api/env`，绝不提交至代码仓库。
+* **配置与代码解耦**：所有敏感密钥（`SENTRY_DSN`、`SYNC_SECRET`、`ANALYTICS_IP_KEY`、`ANALYTICS_SECRET`）独立保存在服务器本地 `/etc/amll-ttml-api/env`，绝不提交至代码仓库。
 
 ---
 
@@ -68,6 +68,7 @@ SENTRY_DSN=填入你的 Sentry DSN 链接
 SYNC_SECRET=/webhook/sync 接口用的密钥
 ANALYTICS_DIR=/var/lib/amll-ttml-api/analytics
 ANALYTICS_IP_KEY=客户端 IP 的 HMAC 密钥，用 openssl rand -hex 32 生成
+ANALYTICS_SECRET=团队下载统计文件用的 token，用 openssl rand -hex 32 生成
 EOF'
 
 # 3. 严格保护文件权限 (仅 root / sudo 可读)
@@ -283,6 +284,7 @@ sudo systemctl restart amll-ttml-api@3001.service
 设置了 `ANALYTICS_DIR` 后，服务会把每个 HTTP 请求先记录到 `$ANALYTICS_DIR/buffer.db`（SQLite，WAL 模式，目录不存在时自动创建）；每个北京时间自然日收齐后（0 点 10 分之后），自动转成 `$ANALYTICS_DIR/parquet/YYYY-MM-DD.parquet` 并从缓冲库删掉。蓝绿两个实例共用同一个目录，同一天只会被转换一次。
 
 * **客户端标识**：只存 `X-Real-IP` 的 HMAC 摘要，不存原始 IP。需要封禁时用 Nginx access log 里的原始 IP。未设置 `ANALYTICS_IP_KEY` 时照常记录，只是客户端标识留空，并在启动时报错上报 Sentry；更换密钥等同于独立客户端重新开始计数。
+* **团队下载**：团队用 `ANALYTICS_SECRET` 作为 token，经 `/v1/admin/analytics/files` 下载每日文件，用法见 [`docs/analytics.md`](docs/analytics.md)。未设置时下载端点返回 500；token 泄露时换一个新值并重启服务即可作废旧的。
 * **保留策略**：每日文件在服务器上保留 90 天；统计目录总大小超过 8 GiB 时从最旧的文件开始提前删除（日志 `Analytics directory over its size cap`）。长期存档靠团队每月把上个月的文件同步到网盘。
 * **磁盘水位**：磁盘剩余空间低于 3 GiB 时暂停写入，日志出现 `Free disk space below the analytics watermark`，空间恢复后自动继续。
 * **资源占用**：按 200 万请求 / 天估算，每日文件约 50 MB；转换时内存峰值约增加 70 MiB，持续一两分钟。缓冲库删除旧行后文件大小不会缩小，空闲页会被新数据复用。

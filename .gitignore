@@ -3,3 +3,5 @@
 data
 .env
 *.snap.new
+# scripts/analytics_sync.py 的默认下载目录
+/amll-analytics

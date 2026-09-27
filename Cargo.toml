@@ -39,9 +39,11 @@ sea-orm = { version = "2.0.0", features = [
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0.150"
 strsim = "0.11.1"
+subtle = "2.6"
 tempfile = "3.27.0"
 tokio = { version = "1.38", features = ["full"] }
-tower-http = { version = "0.7", features = ["cors", "trace"] }
+tower = { version = "0.5", features = ["util"] }
+tower-http = { version = "0.7", features = ["cors", "fs", "trace"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 sentry = { version = "0.49", default-features = false, features = [
@@ -63,7 +65,6 @@ zip = "8.6.0"
 
 [dev-dependencies]
 insta = "1.48.0"
-tower = { version = "0.5", features = ["util"] }
 
 [lints.clippy]
 pedantic = { level = "warn", priority = -1 }

@@ -164,6 +164,7 @@ lib.rs 路由 → api/<模块>/extractor.rs → api/<模块>/handler.rs → serv
 - **歌词搜索与列表接口**（`GET /v1/lyrics/search`、`GET /v1/lrclib/search` 及 `GET /v1/lyrics/list`）：`public, max-age=3600, s-maxage=7200, stale-while-revalidate=1800`（客户端 1 小时 / CDN 2 小时 / SWR 30 分钟）。
 - **404 未找到响应**（`LyricNotFound` 及未匹配路由）：`public, max-age=3600, s-maxage=7200`（客户端 1 小时 / CDN 2 小时负缓存）。
 - **服务状态与探针**（`GET /v1/status` 及 `GET /v1/version`）：`no-store`（禁止任何层级缓存，保证 uptime 与探针实时性）。
+- **内部运维端点**（`GET /v1/admin/analytics/files` 及 `.../files/{name}`）：`no-store`，含错误响应（带 token 的内容不进任何缓存）。
 - **进程内缓存**：`DbLyricStore` 的 `ttml_cache` 与 `formatted_lyric_cache` TTL 均为 14 天，与上面的 HTTP 时限相互独立；实际存活受下面的主动失效约束。
 - **主动失效**：仅在数据同步且发生实际更新时（`res.status == SyncStatus::Updated`），调用 `invalidate_caches()` 清空进程内 Moka 缓存并原子切换倒排索引；若同步被跳过或无数据变更（`SyncStatus::Skipped`），则完整保留热缓存与现有索引。
 
@@ -214,6 +215,15 @@ CORS 与 Trace 之内），为响应生成 `ETag` 并处理 `If-None-Match`，�
 - **保留策略**（`retention.rs`）：每轮转换之后执行——超过 90 天的每日文件删除；统计目录总大小
   超过 8 GiB 时从最旧的每日文件开始删；崩溃遗留超过 1 小时的临时文件删除。长期存档靠团队
   每月手动同步到网盘。
+- **团队下载**（`api/admin/`）：`GET /v1/admin/analytics/files`（清单，读 `conversions`，
+  过滤掉已被保留策略删除的文件）与 `.../files/{name}`（`tower-http` 的 `ServeFile`，支持 Range，
+  加 `X-Accel-Buffering: no` 避免 nginx 把大文件缓冲到磁盘）。`ANALYTICS_SECRET` Bearer 鉴权，
+  常量时间比较；统计未启用时 404、没配密钥时 500（与 webhook 一致）。所有响应含错误一律
+  `no-store`。文件名只认严格的 `YYYY-MM-DD.parquet`（`day::parse_file_name`），杜绝路径穿越。
+  内部接口，不写进公开接口文档；团队用法、同步脚本 `scripts/analytics_sync.py` 与 DuckDB 初始化
+  `docs/analytics/setup.sql` 见 `docs/analytics.md`，那里的 SQL 都要能直接运行。UA 归类表
+  `clients.csv` **不入库**（会公开暴露有哪些应用在用接口），随数据放在团队网盘，
+  本地位于被忽略的 `amll-analytics/` 目录。
 
 ### 同步服务
 

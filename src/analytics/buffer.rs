@@ -181,6 +181,18 @@ pub struct DaySummary {
     pub max_ts: Option<i64>,
 }
 
+/// 一个已转换完成的每日文件，供下载端点的文件清单使用
+#[derive(Debug, Clone, FromQueryResult)]
+pub struct ConvertedDay {
+    pub day: String,
+    pub rows: i64,
+    pub bytes: i64,
+    pub sha256: String,
+    pub min_ts: Option<i64>,
+    pub max_ts: Option<i64>,
+    pub finished_at: i64,
+}
+
 /// 打开（必要时创建）缓冲库并建表
 pub async fn open(path: &Path) -> Result<DatabaseConnection, DbErr> {
     let path = path.to_owned();
@@ -363,4 +375,19 @@ pub async fn finish_day(
         .await?;
 
     Ok(result.rows_affected() == 1)
+}
+
+/// 全部已转换完成的日期，按日期升序。文件可能已被保留策略删除，由调用方核对
+pub async fn converted_days(db: &DatabaseConnection) -> Result<Vec<ConvertedDay>, DbErr> {
+    ConvertedDay::find_by_statement(Statement::from_string(
+        DatabaseBackend::Sqlite,
+        r"
+        SELECT day, rows, bytes, sha256, min_ts, max_ts, finished_at
+        FROM conversions
+        WHERE state = 'done'
+        ORDER BY day;
+        ",
+    ))
+    .all(db)
+    .await
 }
