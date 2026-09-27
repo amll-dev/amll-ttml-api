@@ -1,5 +1,4 @@
 pub use core::db::setup::init_db;
-use std::time::Duration;
 
 use axum::{
     Router,
@@ -20,10 +19,7 @@ use tower_http::trace::{
     DefaultMakeSpan,
     TraceLayer,
 };
-use tracing::{
-    Level,
-    info,
-};
+use tracing::Level;
 
 pub use crate::{
     analytics::{
@@ -78,17 +74,8 @@ pub fn create_app(state: AppState) -> Router {
             get(api::admin::handler::handle_download_file),
         );
 
-    let trace_layer = TraceLayer::new_for_http()
-        .make_span_with(DefaultMakeSpan::new().level(Level::INFO))
-        .on_response(
-            |response: &axum::http::Response<_>, latency: Duration, _span: &tracing::Span| {
-                info!(
-                    status = response.status().as_u16(),
-                    latency_ms = %format_args!("{latency:.2?}"),
-                    "HTTP request completed"
-                );
-            },
-        );
+    let trace_layer =
+        TraceLayer::new_for_http().make_span_with(DefaultMakeSpan::new().level(Level::INFO));
 
     let mut router = Router::new();
     for prefix in API_PREFIXES {
