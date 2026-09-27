@@ -10,6 +10,10 @@ use axum::{
 };
 
 use crate::{
+    analytics::{
+        Annotator,
+        MatchKind,
+    },
     api::{
         lrclib::{
             dto::{
@@ -39,12 +43,22 @@ use crate::{
 
 pub async fn handle_search(
     State(state): State<AppState>,
+    annotator: Annotator,
     RawQuery(raw_query): RawQuery,
 ) -> Result<impl IntoResponse, AppError> {
     let (query, pagination) = extract_lrclib_search_query(raw_query.as_deref().unwrap_or(""))?;
     let hits = lyric_service::lrclib_search(&state.store, &query, pagination).await;
 
+    annotator.listing(
+        hits.pagination.total,
+        hits.items
+            .first()
+            .map(|(entry, _)| (entry.id, Some(MatchKind::Fuzzy))),
+        Some(&query),
+    );
+
     let items: Vec<LrclibSongItem> = hits
+        .items
         .into_iter()
         .map(|(entry, formatted)| map_to_lrclib_item(&entry, formatted.as_ref()))
         .collect();
@@ -54,10 +68,19 @@ pub async fn handle_search(
 
 pub async fn handle_get(
     State(state): State<AppState>,
+    annotator: Annotator,
     RawQuery(raw_query): RawQuery,
 ) -> Result<impl IntoResponse, AppError> {
     let query = extract_lrclib_get_query(raw_query.as_deref().unwrap_or(""))?;
-    let (entry, formatted) = lyric_service::lrclib_get_by_fields(&state.store, query).await?;
+
+    let result = lyric_service::lrclib_get_by_fields(&state.store, &query).await;
+    annotator.lookup(
+        &result,
+        |(entry, _)| entry.id,
+        MatchKind::Fuzzy,
+        Some(&query),
+    );
+    let (entry, formatted) = result?;
 
     Ok((
         [(header::CACHE_CONTROL, WEAK_CACHE_CONTROL)],
@@ -67,10 +90,15 @@ pub async fn handle_get(
 
 pub async fn handle_get_by_id(
     State(state): State<AppState>,
+    annotator: Annotator,
     Path(id): Path<u64>,
 ) -> Result<impl IntoResponse, AppError> {
     let lyric_id = LyricId::from_u64(id)?;
-    let (entry, formatted) = lyric_service::lrclib_get_by_id(&state.store, lyric_id).await?;
+
+    let result = lyric_service::lrclib_get_by_id(&state.store, lyric_id).await;
+    annotator.lookup(&result, |(entry, _)| entry.id, MatchKind::Id, None);
+    let (entry, formatted) = result?;
+
     Ok((
         [(header::CACHE_CONTROL, EXACT_CACHE_CONTROL)],
         Json(map_to_lrclib_item(&entry, Some(&formatted))),

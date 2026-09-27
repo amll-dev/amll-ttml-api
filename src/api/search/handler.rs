@@ -8,6 +8,10 @@ use axum::{
 };
 
 use crate::{
+    analytics::{
+        Annotator,
+        MatchKind,
+    },
     api::{
         search::extractor::extract_search_query,
         shared::{
@@ -29,10 +33,20 @@ use crate::{
 
 pub async fn handle_search(
     State(state): State<AppState>,
+    annotator: Annotator,
     RawQuery(raw_query): RawQuery,
 ) -> Result<impl IntoResponse, AppError> {
     let (query, pagination) = extract_search_query(raw_query.as_deref().unwrap_or(""))?;
     let result = lyric_service::search_lyric(&state.store, &query, pagination).await;
+
+    annotator.listing(
+        result.pagination.total,
+        result
+            .items
+            .first()
+            .map(|hit| (hit.entry.id, Some(MatchKind::for_search_hit(hit)))),
+        Some(&query),
+    );
 
     let items = result
         .items

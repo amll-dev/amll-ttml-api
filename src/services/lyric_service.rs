@@ -239,11 +239,14 @@ pub async fn get_lyric<R: LyricStore>(
     Ok((latest_song_cloned, ttml_text))
 }
 
+/// LRCLIB 兼容搜索，逐条附带解析后的歌词
+///
+/// 对外响应是裸数组，分页元数据只供请求统计取命中总数
 pub async fn lrclib_search<R: LyricStore>(
     store: &R,
     query: &SearchQuery,
     pagination: Pagination,
-) -> Vec<(SongEntry, Option<TTMLFormatResult>)> {
+) -> Paginated<(SongEntry, Option<TTMLFormatResult>)> {
     let db = store.load_index().await;
 
     let matched_hits = db.search_by_fields(query);
@@ -251,7 +254,7 @@ pub async fn lrclib_search<R: LyricStore>(
 
     drop(db);
 
-    futures::stream::iter(paginated.items)
+    let items = futures::stream::iter(paginated.items)
         .map(|entry| async move {
             let formatted = match store.fetch_parsed_lyric(entry.filename.as_str()).await {
                 Ok(f) => Some(f),
@@ -267,15 +270,20 @@ pub async fn lrclib_search<R: LyricStore>(
         })
         .buffered(CONCURRENT_FETCH_LIMIT)
         .collect()
-        .await
+        .await;
+
+    Paginated {
+        items,
+        pagination: paginated.pagination,
+    }
 }
 
 pub async fn lrclib_get_by_fields<R: LyricStore>(
     store: &R,
-    query: SearchQuery,
+    query: &SearchQuery,
 ) -> Result<(SongEntry, TTMLFormatResult), AppError> {
     let db = store.load_index().await;
-    let matched_hits = db.search_by_fields(&query);
+    let matched_hits = db.search_by_fields(query);
 
     if matched_hits.is_empty() {
         return Err(AppError::LyricNotFound);
@@ -1029,9 +1037,10 @@ mod tests {
             ..Default::default()
         };
 
-        let items = lrclib_search(&store, &query, default_pagination()).await;
-        assert_eq!(items.len(), 2);
-        for (entry, formatted) in &items {
+        let res = lrclib_search(&store, &query, default_pagination()).await;
+        assert_eq!(res.items.len(), 2);
+        assert_eq!(res.pagination.total, 2);
+        for (entry, formatted) in &res.items {
             assert!(!entry.filename.as_str().is_empty());
             let formatted = formatted.as_ref().unwrap();
             assert_eq!(formatted.plain_lyrics.as_deref(), Some("Hello World Lyric"));
@@ -1051,7 +1060,7 @@ mod tests {
             ..Default::default()
         };
 
-        let (entry, formatted) = lrclib_get_by_fields(&store, query).await.unwrap();
+        let (entry, formatted) = lrclib_get_by_fields(&store, &query).await.unwrap();
         assert_eq!(entry.id, id1);
         assert_eq!(entry.track_names[0].as_str(), "Test Song One");
         assert_eq!(formatted.plain_lyrics.as_deref(), Some("Hello World Lyric"));
@@ -1064,7 +1073,7 @@ mod tests {
             track_name: Some("NonExistentTrack".to_string()),
             ..Default::default()
         };
-        let err = lrclib_get_by_fields(&store, no_match_query).await;
+        let err = lrclib_get_by_fields(&store, &no_match_query).await;
         assert!(matches!(err, Err(AppError::LyricNotFound)));
     }
 

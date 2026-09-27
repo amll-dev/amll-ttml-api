@@ -81,7 +81,8 @@ cargo build --release
 - **`lyric_service`**（`services/lyric_service.rs`）：业务层自由函数，见下文请求分层。
 - **`AppState`**（`services/app_state.rs`）：axum `State` 的全局状态，纯装配——
   持有 `store` / `syncer` / `start_time`（status 端点报 uptime）/ `sync_secret`
-  （webhook 鉴权），自身不含业务方法。`Clone` 为浅拷贝，所有克隆共享同一套连接、缓存与锁。
+  （webhook 鉴权）/ `analytics`（请求统计句柄，未启用时为 `None`），自身不含业务方法。
+  `Clone` 为浅拷贝，所有克隆共享同一套连接、缓存与锁。
 
 ### 请求分层
 
@@ -99,6 +100,8 @@ lib.rs 路由 → api/<模块>/extractor.rs → api/<模块>/handler.rs → serv
   `{"status": 200, "data": ...}` 信封，与错误侧 `AppError` 的 `IntoResponse` 对称
   （handler 签名统一为 `Result<ApiSuccess<T>, AppError>`）；lrclib 兼容端点返回
   裸数组/裸对象，不套信封。
+  数据端点的 handler 另取一个 `Annotator` 提取器，把命中数等业务信息交给请求统计（见下文），
+  统计未启用时它是空壳。
 - `lyric_service` 只返回领域数据（`SongEntry`、`LyricSearchResult`、元组配对），
   分页在 service 内完成；DTO 映射与线格式全部留在 api 层。
 - `LyricStore` 统一抽象了 4 个 I/O 接口：`fetch_lyric_ttml`、`fetch_parsed_lyric`、`search_lyrics_fts` 和 `load_index`。
@@ -176,6 +179,30 @@ CORS 与 Trace 之内），为响应生成 `ETag` 并处理 `If-None-Match`，�
   所以 `no-store` 的探针端点、负缓存的 404、400 都不参与。新增端点选定缓存档位即自动获得。
 - **304 必须带回 `ETag` 与 `Cache-Control`**（复用原响应的 header map 实现），
   后者用于刷新客户端已存副本的新鲜度，缺失会导致下次请求立刻又要重新验证。
+
+### 请求统计
+
+`analytics/` 逐请求记录 HTTP 层字段与业务标注，取代了 Sentry 逐请求 transaction
+（Sentry 的 `traces_sample_rate` 默认改为 0，只报错误）。由 `ANALYTICS_DIR` 开关：
+未设置时中间件根本不挂载；启动失败只关闭统计，不影响主服务。
+
+- **采集**（`middleware.rs` / `record.rs`）：`lib.rs` 里最后一个 `.layer()`，位于最外层，
+  CORS 预检、404 fallback、`ETag` 降级后的 304 都会被记录。路由模板取自 `MatchedPath`
+  并剥掉 `API_PREFIXES` 里的前缀（`prefix` 列单独记）。客户端标识是 `X-Real-IP` 的
+  HMAC-SHA256（密钥 `ANALYTICS_IP_KEY`）截断 64 位，不存原始 IP；`X-Forwarded-For`
+  可被客户端伪造，不用。所有文本字段都有长度上限。
+- **业务标注**（`annotation.rs`）：中间件为每个请求插入 `Annotator`，handler 调 `lookup`
+  （get 系列）或 `listing`（search 系列与 list）提交。`MatchKind::as_str` 的取值是落库契约，
+  不能改名。`norm_query` 只在未命中时经 `PreparedQuery` 生成，与检索同一套归一化，
+  所以 `normalize.rs` 的改动也会让这一列前后口径不一致。
+- **写入**（`writer.rs` / `buffer.rs`）：有界 channel → 后台任务每秒或每 2000 条提交一个事务，
+  写入 `$ANALYTICS_DIR/buffer.db`（WAL，蓝绿两个实例共用，靠 `busy_timeout` 串行化写锁）。
+  channel 满即丢弃计数、写入失败不重试、磁盘剩余不足 3 GiB 时整批丢弃；日志只在状态切换时打，
+  避免持续故障刷爆 Sentry 配额。停机时 `main` 在 `axum::serve` 返回后调
+  `AnalyticsWriter::shutdown` 刷盘。
+- **表结构**：`buffer.rs` 的 DDL 与 `INSERT_SQL` 列序互为同一契约；改表结构要递增
+  `SCHEMA_VERSION`（写进 `PRAGMA user_version`）。
+- 缓冲目前只增不减：按北京时间日界转 Parquet、保留策略与团队下载端点尚未实现。
 
 ### 同步服务
 

@@ -8,6 +8,7 @@ use axum::{
 };
 
 use crate::{
+    analytics::Annotator,
     api::{
         list::extractor::extract_list_query,
         shared::{
@@ -28,10 +29,17 @@ use crate::{
 
 pub async fn handle_list(
     State(state): State<AppState>,
+    annotator: Annotator,
     RawQuery(raw_query): RawQuery,
 ) -> Result<impl IntoResponse, AppError> {
     let query = extract_list_query(raw_query.as_deref().unwrap_or(""))?;
     let result = lyric_service::list_lyrics(&state.store, query).await;
+
+    annotator.listing(
+        result.pagination.total,
+        result.items.first().map(|entry| (entry.id, None)),
+        None,
+    );
 
     let items = result
         .items

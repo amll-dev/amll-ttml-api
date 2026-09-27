@@ -3,7 +3,10 @@ use std::time::Duration;
 
 use axum::{
     Router,
-    middleware::from_fn,
+    middleware::{
+        from_fn,
+        from_fn_with_state,
+    },
     routing::{
         get,
         post,
@@ -22,12 +25,20 @@ use tracing::{
     info,
 };
 
-pub use crate::services::AppState;
+pub use crate::{
+    analytics::{
+        Analytics,
+        AnalyticsConfig,
+        AnalyticsWriter,
+    },
+    services::AppState,
+};
 use crate::{
     core::error::AppError,
     utils::cors::create_cors_layer,
 };
 
+mod analytics;
 mod api;
 mod core;
 mod services;
@@ -35,6 +46,11 @@ mod utils;
 
 #[cfg(test)]
 mod wire_format_tests;
+
+/// 同一套 v1 路由挂载的两个前缀
+///
+/// 请求统计按它区分客户端走的是哪个前缀，以后决定是否下线某个前缀时要用
+pub(crate) const API_PREFIXES: [&str; 2] = ["/v1", "/api/v1"];
 
 pub fn create_app(state: AppState) -> Router {
     let v1_routes = Router::new()
@@ -66,14 +82,24 @@ pub fn create_app(state: AppState) -> Router {
             },
         );
 
-    Router::new()
-        .nest("/v1", v1_routes.clone())
-        .nest("/api/v1", v1_routes)
+    let mut router = Router::new();
+    for prefix in API_PREFIXES {
+        router = router.nest(prefix, v1_routes.clone());
+    }
+
+    let router = router
         .fallback(|| async { AppError::NotFound })
         .layer(from_fn(api::shared::etag::apply))
         .layer(NewSentryLayer::new_from_top())
         .layer(SentryHttpLayer::new().enable_transaction())
         .layer(create_cors_layer())
-        .layer(trace_layer)
-        .with_state(state)
+        .layer(trace_layer);
+
+    // 请求统计挂在最外层，未启用时不挂载
+    let router = match state.analytics.clone() {
+        Some(handle) => router.layer(from_fn_with_state(handle, analytics::record)),
+        None => router,
+    };
+
+    router.with_state(state)
 }

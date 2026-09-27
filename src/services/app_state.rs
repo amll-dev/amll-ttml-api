@@ -2,18 +2,22 @@
 //!
 //! 进程内共享的一组句柄，在启动时构造，经 axum 的 `State` 提取器注入各 handler
 //!
-//! 持有四样东西：
+//! 持有五样东西：
 //! 1. 歌词存储 [`DbLyricStore`]（取词、FTS 检索、内存索引）
 //! 2. 数据同步器 [`LyricSyncer`]（从远端仓库刷新 SQLite 并重建索引）
 //! 3. 启动时刻（status 端点报告正常运行时间用）
 //! 4. webhook 鉴权密钥
+//! 5. 请求统计句柄 [`Analytics`]（未启用时为空，统计中间件随之不挂载）
 
 use compact_str::CompactString;
 use sea_orm::DatabaseConnection;
 
-use crate::services::{
-    db_lyric_store::DbLyricStore,
-    lyric_syncer::LyricSyncer,
+use crate::{
+    analytics::Analytics,
+    services::{
+        db_lyric_store::DbLyricStore,
+        lyric_syncer::LyricSyncer,
+    },
 };
 
 #[derive(Clone)]
@@ -22,6 +26,7 @@ pub struct AppState {
     pub syncer: LyricSyncer,
     pub start_time: std::time::Instant,
     pub sync_secret: Option<CompactString>,
+    pub analytics: Option<Analytics>,
 }
 
 impl AppState {
@@ -45,6 +50,14 @@ impl AppState {
             syncer,
             start_time: std::time::Instant::now(),
             sync_secret: secret.map(CompactString::new),
+            analytics: None,
         }
+    }
+
+    /// 启用请求统计
+    #[must_use]
+    pub fn with_analytics(mut self, analytics: Analytics) -> Self {
+        self.analytics = Some(analytics);
+        self
     }
 }

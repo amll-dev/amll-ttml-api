@@ -27,12 +27,13 @@
                                         ▼                            ▼
                         ┌──────────────────────────────────────────────────────────┐
                         │   环境变量配置文件 (服务器保密): /etc/amll-ttml-api/env  │
-                        │   包含: SENTRY_DSN, SYNC_SECRET, DATABASE_URL            │
+                        │   包含: SENTRY_DSN, SYNC_SECRET, DATABASE_URL,           │
+                        │         ANALYTICS_DIR, ANALYTICS_IP_KEY                  │
                         └──────────────────────────────────────────────────────────┘
 ```
 
 * **无缝热更新 (Zero-Downtime)**：利用 Systemd 模板服务 (`amll-ttml-api@.service`) 在端口 3000 与 3001 之间平滑热切换，配合健康检查与 Nginx 重载，实现发布更新时用户完全零感停机。
-* **配置与代码解耦**：所有敏感密钥（`SENTRY_DSN`、`SYNC_SECRET`）独立保存在服务器本地 `/etc/amll-ttml-api/env`，绝不提交至代码仓库。
+* **配置与代码解耦**：所有敏感密钥（`SENTRY_DSN`、`SYNC_SECRET`、`ANALYTICS_IP_KEY`）独立保存在服务器本地 `/etc/amll-ttml-api/env`，绝不提交至代码仓库。
 
 ---
 
@@ -65,6 +66,8 @@ sudo bash -c 'cat <<EOF > /etc/amll-ttml-api/env
 PORT=3000
 SENTRY_DSN=填入你的 Sentry DSN 链接
 SYNC_SECRET=/webhook/sync 接口用的密钥
+ANALYTICS_DIR=/var/lib/amll-ttml-api/analytics
+ANALYTICS_IP_KEY=客户端 IP 的 HMAC 密钥，用 openssl rand -hex 32 生成
 EOF'
 
 # 3. 严格保护文件权限 (仅 root / sudo 可读)
@@ -274,4 +277,20 @@ sudo nano /etc/amll-ttml-api/env
 sudo systemctl restart amll-ttml-api@3000.service
 # 或重启另一个端口服务
 sudo systemctl restart amll-ttml-api@3001.service
+```
+
+### 6.4 请求统计
+设置了 `ANALYTICS_DIR` 后，服务会把每个 HTTP 请求记录到 `$ANALYTICS_DIR/buffer.db`（SQLite，WAL 模式），目录不存在时自动创建。蓝绿两个实例共用同一个文件。
+
+* **客户端标识**：只存 `X-Real-IP` 的 HMAC 摘要，不存原始 IP。需要封禁时用 Nginx access log 里的原始 IP。未设置 `ANALYTICS_IP_KEY` 时照常记录，只是客户端标识留空，并在启动时报错上报 Sentry；更换密钥等同于独立客户端重新开始计数。
+* **磁盘水位**：磁盘剩余空间低于 3 GiB 时暂停写入，日志出现 `Free disk space below the analytics watermark`，空间恢复后自动继续。
+* **故障隔离**：统计目录不可写或缓冲库打不开时只关闭统计，服务照常启动。
+* **已知缺口**：Nginx `limit_req` 直接返回的 429 到不了应用，不会进统计。
+* **注意**：缓冲目前只增不减（按天转换为 Parquet 与保留策略尚未上线），按日均 55 万请求估算每天增长约 55 MB。
+
+```bash
+# 查看缓冲里的记录数与最近几条请求（需要先 sudo apt-get install -y sqlite3）
+sudo sqlite3 /var/lib/amll-ttml-api/analytics/buffer.db "SELECT count(*) FROM requests;"
+sudo sqlite3 -header -column /var/lib/amll-ttml-api/analytics/buffer.db \
+  "SELECT datetime(ts / 1000, 'unixepoch') AS time, method, route, status, latency_us, hit_count FROM requests ORDER BY ts DESC LIMIT 20;"
 ```

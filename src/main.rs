@@ -4,6 +4,9 @@ use std::{
 };
 
 use amll_ttml_api::{
+    Analytics,
+    AnalyticsConfig,
+    AnalyticsWriter,
     AppState,
     create_app,
     init_db,
@@ -24,11 +27,12 @@ async fn main() -> Result<()> {
     dotenvy::dotenv().ok();
 
     let sentry_dsn = env::var("SENTRY_DSN").ok();
+    // 逐请求数据由请求统计负责，Sentry 默认只上报错误；排查性能问题时再临时调高采样率
     let traces_sample_rate = env::var("SENTRY_TRACES_SAMPLE_RATE")
         .ok()
         .and_then(|v| v.parse::<f32>().ok())
         .filter(|&rate| (0.0..=1.0).contains(&rate))
-        .unwrap_or(1.0);
+        .unwrap_or(0.0);
 
     let mut options = sentry::ClientOptions::default();
     options.release = sentry::release_name!();
@@ -60,7 +64,12 @@ async fn main() -> Result<()> {
 
     info!("Initialized SQLite database connection pool at {db_url}");
 
-    let state = AppState::new(db_conn);
+    let port = env::var("PORT")
+        .ok()
+        .and_then(|p| p.parse::<u16>().ok())
+        .unwrap_or(3000);
+
+    let (state, analytics_writer) = start_analytics(AppState::new(db_conn), port).await;
 
     // 启动时从本地数据库建立内存索引，搜索立即可用
     // 如果本地没有数据库，需要等待 `LyricSyncer.sync` 的第一次同步
@@ -95,11 +104,6 @@ async fn main() -> Result<()> {
 
     let app = create_app(state);
 
-    let port = env::var("PORT")
-        .ok()
-        .and_then(|p| p.parse::<u16>().ok())
-        .unwrap_or(3000);
-
     let addr = format!("0.0.0.0:{port}");
     let listener = TcpListener::bind(&addr).await.map_err(|e| {
         error!("Startup error: Failed to bind to `{addr}`: {e:?}");
@@ -132,13 +136,41 @@ async fn main() -> Result<()> {
         }
     };
 
-    axum::serve(listener, app)
+    let served = axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal)
-        .await
-        .map_err(|e| {
-            error!("Server error: {e:?}");
-            e
-        })?;
+        .await;
+
+    // 在途请求都已结束，它们的统计记录都在 channel 里，此时刷盘不会漏
+    if let Some(writer) = analytics_writer {
+        writer.shutdown().await;
+    }
+
+    served.map_err(|e| {
+        error!("Server error: {e:?}");
+        e
+    })?;
 
     Ok(())
+}
+
+/// 按环境变量启用请求统计
+///
+/// 统计出任何问题都不能影响主服务启动，失败只关闭统计
+async fn start_analytics(state: AppState, port: u16) -> (AppState, Option<AnalyticsWriter>) {
+    let Some(config) = AnalyticsConfig::from_env(port) else {
+        info!("Request analytics disabled (ANALYTICS_DIR not set)");
+        return (state, None);
+    };
+
+    let dir = config.dir.clone();
+    match Analytics::start(config).await {
+        Ok((analytics, writer)) => {
+            info!("Request analytics enabled, buffering to {}", dir.display());
+            (state.with_analytics(analytics), Some(writer))
+        }
+        Err(e) => {
+            error!("Failed to start request analytics, continuing without it: {e:?}");
+            (state, None)
+        }
+    }
 }

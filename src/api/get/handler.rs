@@ -8,6 +8,10 @@ use axum::{
 };
 
 use crate::{
+    analytics::{
+        Annotator,
+        MatchKind,
+    },
     api::{
         get::extractor::extract_get_query,
         shared::{
@@ -30,12 +34,16 @@ use crate::{
 
 pub async fn handle_get(
     State(state): State<AppState>,
+    annotator: Annotator,
     RawQuery(raw_query): RawQuery,
 ) -> Result<impl IntoResponse, AppError> {
     let get_query = extract_get_query(raw_query.as_deref().unwrap_or(""))?;
     let is_exact = get_query.id_query.is_exact();
+    let match_kind = MatchKind::for_id_query(&get_query.id_query);
 
-    let (entry, ttml_text) = lyric_service::get_lyric(&state.store, get_query.id_query).await?;
+    let result = lyric_service::get_lyric(&state.store, get_query.id_query).await;
+    annotator.lookup(&result, |(entry, _)| entry.id, match_kind, None);
+    let (entry, ttml_text) = result?;
 
     let cache_control = if is_exact {
         EXACT_CACHE_CONTROL
