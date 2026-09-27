@@ -280,17 +280,17 @@ sudo systemctl restart amll-ttml-api@3001.service
 ```
 
 ### 6.4 请求统计
-设置了 `ANALYTICS_DIR` 后，服务会把每个 HTTP 请求记录到 `$ANALYTICS_DIR/buffer.db`（SQLite，WAL 模式），目录不存在时自动创建。蓝绿两个实例共用同一个文件。
+设置了 `ANALYTICS_DIR` 后，服务会把每个 HTTP 请求先记录到 `$ANALYTICS_DIR/buffer.db`（SQLite，WAL 模式，目录不存在时自动创建）；每个北京时间自然日收齐后（0 点 10 分之后），自动转成 `$ANALYTICS_DIR/parquet/YYYY-MM-DD.parquet` 并从缓冲库删掉。蓝绿两个实例共用同一个目录，同一天只会被转换一次。
 
 * **客户端标识**：只存 `X-Real-IP` 的 HMAC 摘要，不存原始 IP。需要封禁时用 Nginx access log 里的原始 IP。未设置 `ANALYTICS_IP_KEY` 时照常记录，只是客户端标识留空，并在启动时报错上报 Sentry；更换密钥等同于独立客户端重新开始计数。
+* **保留策略**：每日文件在服务器上保留 90 天；统计目录总大小超过 8 GiB 时从最旧的文件开始提前删除（日志 `Analytics directory over its size cap`）。长期存档靠团队每月把上个月的文件同步到网盘。
 * **磁盘水位**：磁盘剩余空间低于 3 GiB 时暂停写入，日志出现 `Free disk space below the analytics watermark`，空间恢复后自动继续。
+* **资源占用**：按 200 万请求 / 天估算，每日文件约 50 MB；转换时内存峰值约增加 70 MiB，持续一两分钟。缓冲库删除旧行后文件大小不会缩小，空闲页会被新数据复用。
 * **故障隔离**：统计目录不可写或缓冲库打不开时只关闭统计，服务照常启动。
 * **已知缺口**：Nginx `limit_req` 直接返回的 429 到不了应用，不会进统计。
-* **注意**：缓冲目前只增不减（按天转换为 Parquet 与保留策略尚未上线），按日均 55 万请求估算每天增长约 55 MB。
 
 ```bash
-# 查看缓冲里的记录数与最近几条请求（需要先 sudo apt-get install -y sqlite3）
-sudo sqlite3 /var/lib/amll-ttml-api/analytics/buffer.db "SELECT count(*) FROM requests;"
-sudo sqlite3 -header -column /var/lib/amll-ttml-api/analytics/buffer.db \
-  "SELECT datetime(ts / 1000, 'unixepoch') AS time, method, route, status, latency_us, hit_count FROM requests ORDER BY ts DESC LIMIT 20;"
+# 查看每日文件与转换记录
+sudo ls -lh /var/lib/amll-ttml-api/analytics/parquet/
+sudo python3 -c "import sqlite3; db = sqlite3.connect('/var/lib/amll-ttml-api/analytics/buffer.db'); print(db.execute('SELECT count(*) FROM requests').fetchone()); [print(r) for r in db.execute('SELECT day, state, rows, bytes FROM conversions ORDER BY day DESC LIMIT 10')]"
 ```

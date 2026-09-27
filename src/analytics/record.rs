@@ -179,7 +179,7 @@ impl PendingRecord {
     }
 }
 
-fn now_millis() -> i64 {
+pub fn now_millis() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))

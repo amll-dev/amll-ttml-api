@@ -6,7 +6,7 @@ use std::{
 use amll_ttml_api::{
     Analytics,
     AnalyticsConfig,
-    AnalyticsWriter,
+    AnalyticsTasks,
     AppState,
     create_app,
     init_db,
@@ -69,7 +69,7 @@ async fn main() -> Result<()> {
         .and_then(|p| p.parse::<u16>().ok())
         .unwrap_or(3000);
 
-    let (state, analytics_writer) = start_analytics(AppState::new(db_conn), port).await;
+    let (state, analytics_tasks) = start_analytics(AppState::new(db_conn), port).await;
 
     // 启动时从本地数据库建立内存索引，搜索立即可用
     // 如果本地没有数据库，需要等待 `LyricSyncer.sync` 的第一次同步
@@ -141,8 +141,8 @@ async fn main() -> Result<()> {
         .await;
 
     // 在途请求都已结束，它们的统计记录都在 channel 里，此时刷盘不会漏
-    if let Some(writer) = analytics_writer {
-        writer.shutdown().await;
+    if let Some(tasks) = analytics_tasks {
+        tasks.shutdown().await;
     }
 
     served.map_err(|e| {
@@ -156,7 +156,7 @@ async fn main() -> Result<()> {
 /// 按环境变量启用请求统计
 ///
 /// 统计出任何问题都不能影响主服务启动，失败只关闭统计
-async fn start_analytics(state: AppState, port: u16) -> (AppState, Option<AnalyticsWriter>) {
+async fn start_analytics(state: AppState, port: u16) -> (AppState, Option<AnalyticsTasks>) {
     let Some(config) = AnalyticsConfig::from_env(port) else {
         info!("Request analytics disabled (ANALYTICS_DIR not set)");
         return (state, None);
@@ -164,9 +164,9 @@ async fn start_analytics(state: AppState, port: u16) -> (AppState, Option<Analyt
 
     let dir = config.dir.clone();
     match Analytics::start(config).await {
-        Ok((analytics, writer)) => {
+        Ok((analytics, tasks)) => {
             info!("Request analytics enabled, buffering to {}", dir.display());
-            (state.with_analytics(analytics), Some(writer))
+            (state.with_analytics(analytics), Some(tasks))
         }
         Err(e) => {
             error!("Failed to start request analytics, continuing without it: {e:?}");

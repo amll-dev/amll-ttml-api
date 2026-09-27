@@ -10,8 +10,11 @@ homepage = "https://github.com/amll-dev/amll-ttml-api"
 [dependencies]
 anyhow = "1.0"
 arc-swap = "1.7"
+arrow-array = "60"
+arrow-schema = "60"
 async-lock = "3.4.2"
 axum = "0.8.9"
+chrono = { version = "0.4", default-features = false, features = ["std"] }
 compact_str = { version = "0.10.0", features = ["serde"] }
 dotenvy = "0.15.7"
 ferrous-opencc = { version = "0.4.0", default-features = false, features = [
@@ -22,6 +25,10 @@ futures = "0.3.33"
 hex = "0.4"
 hmac = "0.13"
 moka = { version = "0.12", features = ["future"] }
+parquet = { version = "60", default-features = false, features = [
+    "arrow",
+    "zstd",
+] }
 reqwest = { version = "0.13", features = ["json", "default-tls"] }
 sha2 = "0.11"
 sea-orm = { version = "2.0.0", features = [

@@ -23,11 +23,8 @@ use axum::{
     },
 };
 use sea_orm::{
-    DatabaseBackend,
     EntityTrait,
-    FromQueryResult,
     IntoActiveModel,
-    Statement,
 };
 use tempfile::TempDir;
 use tokio::sync::mpsc;
@@ -36,9 +33,12 @@ use tower::ServiceExt;
 use super::{
     Analytics,
     AnalyticsConfig,
-    AnalyticsWriter,
+    AnalyticsTasks,
     BUFFER_FILE,
-    buffer,
+    buffer::{
+        self,
+        BufferedRow,
+    },
     record::RequestRecord,
 };
 use crate::{
@@ -57,29 +57,7 @@ use crate::{
 const SONG_FILE: &str = "test_song_one.ttml";
 const SONG_TTML: &str = r#"<tt xmlns="http://www.w3.org/ns/ttml"><body><div><p begin="00:01.000" end="00:03.000">Hello World Lyric</p></div></body></tt>"#;
 
-#[derive(Debug, FromQueryResult)]
-struct Row {
-    method: String,
-    prefix: Option<String>,
-    route: Option<String>,
-    raw_path: Option<String>,
-    params: Option<String>,
-    status: i32,
-    latency_us: i64,
-    resp_bytes: Option<i64>,
-    conditional: bool,
-    user_agent: Option<String>,
-    origin: Option<String>,
-    referer: Option<String>,
-    client_id: Option<i64>,
-    instance: String,
-    hit_count: Option<i64>,
-    hit_id: Option<i64>,
-    match_kind: Option<String>,
-    norm_query: Option<String>,
-}
-
-async fn app_with_analytics(config: AnalyticsConfig) -> (Router, AnalyticsWriter) {
+async fn app_with_analytics(config: AnalyticsConfig) -> (Router, AnalyticsTasks) {
     let db_conn = init_db("sqlite::memory:").await.expect("init in-memory db");
 
     let parsed = ttml_processor::parse_ttml(SONG_TTML).expect("sample ttml must parse");
@@ -89,7 +67,7 @@ async fn app_with_analytics(config: AnalyticsConfig) -> (Router, AnalyticsWriter
         .await
         .expect("seed entity row");
 
-    let (analytics, writer) = Analytics::start(config).await.expect("start analytics");
+    let (analytics, tasks) = Analytics::start(config).await.expect("start analytics");
     let state = AppState::new_with_secret(db_conn, None).with_analytics(analytics);
     state
         .store
@@ -104,7 +82,7 @@ async fn app_with_analytics(config: AnalyticsConfig) -> (Router, AnalyticsWriter
             &[],
         )]));
 
-    (create_app(state), writer)
+    (create_app(state), tasks)
 }
 
 async fn send(app: &Router, request: Request<Body>) -> (StatusCode, axum::http::HeaderMap) {
@@ -123,17 +101,13 @@ fn get(uri: &str) -> Request<Body> {
         .expect("build request")
 }
 
-async fn read_rows(dir: &TempDir) -> Vec<Row> {
+async fn read_rows(dir: &TempDir) -> Vec<BufferedRow> {
     let db = buffer::open(&dir.path().join(BUFFER_FILE))
         .await
         .expect("reopen buffer");
-    Row::find_by_statement(Statement::from_string(
-        DatabaseBackend::Sqlite,
-        "SELECT * FROM requests ORDER BY rowid",
-    ))
-    .all(&db)
-    .await
-    .expect("read rows")
+    buffer::read_range(&db, i64::MIN, i64::MAX, None, 1_000)
+        .await
+        .expect("read rows")
 }
 
 fn song_id() -> i64 {
@@ -146,7 +120,7 @@ async fn records_http_fields_and_business_annotations() {
     let dir = tempfile::tempdir().unwrap();
     let config = AnalyticsConfig::new(dir.path().to_owned(), Some(b"test-key".to_vec()), 3000);
     let instance = config.instance.clone();
-    let (app, writer) = app_with_analytics(config).await;
+    let (app, tasks) = app_with_analytics(config).await;
 
     // 0：元数据搜索命中，带齐客户端请求头
     let (status, headers) = send(
@@ -212,7 +186,7 @@ async fn records_http_fields_and_business_annotations() {
     let (status, _) = send(&app, get("/v1/lyrics/list?pageSize=1")).await;
     assert_eq!(status, StatusCode::OK);
 
-    writer.shutdown().await;
+    tasks.shutdown().await;
     let rows = read_rows(&dir).await;
     assert_eq!(rows.len(), 8, "{rows:#?}");
 
@@ -292,7 +266,7 @@ async fn records_http_fields_and_business_annotations() {
 #[tokio::test]
 async fn missing_ip_key_keeps_recording_without_client_id() {
     let dir = tempfile::tempdir().unwrap();
-    let (app, writer) =
+    let (app, tasks) =
         app_with_analytics(AnalyticsConfig::new(dir.path().to_owned(), None, 3000)).await;
 
     send(
@@ -304,7 +278,7 @@ async fn missing_ip_key_keeps_recording_without_client_id() {
     )
     .await;
 
-    writer.shutdown().await;
+    tasks.shutdown().await;
     let rows = read_rows(&dir).await;
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].route.as_deref(), Some("/status"));
@@ -316,12 +290,12 @@ async fn low_disk_watermark_discards_records() {
     let dir = tempfile::tempdir().unwrap();
     let mut config = AnalyticsConfig::new(dir.path().to_owned(), None, 3000);
     config.min_free_bytes = u64::MAX;
-    let (app, writer) = app_with_analytics(config).await;
+    let (app, tasks) = app_with_analytics(config).await;
 
     let (status, _) = send(&app, get("/v1/status")).await;
     assert_eq!(status, StatusCode::OK, "统计停写不能影响请求本身");
 
-    writer.shutdown().await;
+    tasks.shutdown().await;
     assert!(read_rows(&dir).await.is_empty());
 }
 

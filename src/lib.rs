@@ -29,7 +29,7 @@ pub use crate::{
     analytics::{
         Analytics,
         AnalyticsConfig,
-        AnalyticsWriter,
+        AnalyticsTasks,
     },
     services::AppState,
 };

@@ -182,9 +182,9 @@ CORS 与 Trace 之内），为响应生成 `ETag` 并处理 `If-None-Match`，�
 
 ### 请求统计
 
-`analytics/` 逐请求记录 HTTP 层字段与业务标注，取代了 Sentry 逐请求 transaction
-（Sentry 的 `traces_sample_rate` 默认改为 0，只报错误）。由 `ANALYTICS_DIR` 开关：
-未设置时中间件根本不挂载；启动失败只关闭统计，不影响主服务。
+`analytics/` 逐请求记录 HTTP 层字段与业务标注，先写 SQLite 热缓冲，每天转成一个 Parquet 文件，
+取代了 Sentry 逐请求 transaction（Sentry 的 `traces_sample_rate` 默认改为 0，只报错误）。
+由 `ANALYTICS_DIR` 开关：未设置时中间件根本不挂载；启动失败只关闭统计，不影响主服务。
 
 - **采集**（`middleware.rs` / `record.rs`）：`lib.rs` 里最后一个 `.layer()`，位于最外层，
   CORS 预检、404 fallback、`ETag` 降级后的 304 都会被记录。路由模板取自 `MatchedPath`
@@ -199,10 +199,21 @@ CORS 与 Trace 之内），为响应生成 `ETag` 并处理 `If-None-Match`，�
   写入 `$ANALYTICS_DIR/buffer.db`（WAL，蓝绿两个实例共用，靠 `busy_timeout` 串行化写锁）。
   channel 满即丢弃计数、写入失败不重试、磁盘剩余不足 3 GiB 时整批丢弃；日志只在状态切换时打，
   避免持续故障刷爆 Sentry 配额。停机时 `main` 在 `axum::serve` 返回后调
-  `AnalyticsWriter::shutdown` 刷盘。
-- **表结构**：`buffer.rs` 的 DDL 与 `INSERT_SQL` 列序互为同一契约；改表结构要递增
-  `SCHEMA_VERSION`（写进 `PRAGMA user_version`）。
-- 缓冲目前只增不减：按北京时间日界转 Parquet、保留策略与团队下载端点尚未实现。
+  `AnalyticsTasks::shutdown`：先停转换任务，再让写入任务刷盘。
+- **表结构**：`buffer.rs` 的 DDL、`INSERT_SQL` 列序、`BufferedRow` 字段与 `parquet_file.rs`
+  的 Arrow schema 互为同一契约；改缓冲库结构要递增 `buffer::SCHEMA_VERSION`
+  （写进 `PRAGMA user_version`），改 Parquet 列要递增 `parquet_file::SCHEMA_VERSION`
+  （写进文件元数据 `amll.schema_version`）。Parquet 列已发布即为团队 SQL 的契约，只增不改。
+- **每日转换**（`convert.rs` / `day.rs` / `parquet_file.rs`）：每 5 分钟检查，北京时间
+  （固定 UTC+8）过 0 点 10 分后把前一天转成 `$ANALYTICS_DIR/parquet/YYYY-MM-DD.parquet`
+  （zstd，按 `(ts, rowid)` 排序），积压的多天一轮补完。蓝绿两个实例靠 `conversions` 表的
+  带租约认领（单条 upsert 原子完成）保证同一天只转一次；顺序是「临时文件 → rename →
+  标记完成 → 按小批删原始行」，任一步崩溃都可恢复。`conversions` 记下每个文件的行数、字节数、
+  sha256 与时间范围。服务器内存很紧（约 200 MiB 余量、无 swap），所以流式分块读写、
+  row group 按字节数封顶，实测 200 万行 / 天峰值约 +70 MiB。
+- **保留策略**（`retention.rs`）：每轮转换之后执行——超过 90 天的每日文件删除；统计目录总大小
+  超过 8 GiB 时从最旧的每日文件开始删；崩溃遗留超过 1 小时的临时文件删除。长期存档靠团队
+  每月手动同步到网盘。
 
 ### 同步服务
 
