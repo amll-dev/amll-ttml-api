@@ -5,3 +5,5 @@ data
 *.snap.new
 # scripts/analytics_sync.py 的默认下载目录
 /amll-analytics
+# 本地测试用的 token 文件，从服务器 /etc/amll-ttml-api/env 取出，切勿提交
+/scripts/env
