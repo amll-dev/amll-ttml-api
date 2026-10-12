@@ -1,6 +1,6 @@
 # AMLL TTML API 服务器部署与运维指南
 
-本指南详细说明了如何在 Ubuntu/Debian Linux 服务器上从零搭建、配置与运维 **AMLL TTML API** 服务。部署架构基于 **Systemd 蓝绿无缝热部署**、**Nginx 反向代理 + Let's Encrypt HTTPS** 以及 **GitHub Actions 自动化 CI/CD**。
+本指南详细说明了如何在 Ubuntu/Debian Linux 服务器上从零搭建、配置与运维 **AMLL TTML API** 服务。部署架构基于 **Docker 容器化蓝绿无缝热部署**、**Nginx 反向代理 + Let's Encrypt HTTPS** 以及 **GitHub Actions + GitHub Packages (GHCR) 自动化 CI/CD**。
 
 ---
 
@@ -18,12 +18,12 @@
                                                      │ (http://127.0.0.1:3000 或 3001)
                                                      ▼
                         ┌──────────────────────────────────────────────────────────┐
-                        │        Systemd 蓝绿服务 (amll-ttml-api@.service)          │
+                        │         Docker 蓝绿容器 (GHCR 镜像)                       │
                         │ ┌──────────────────────────┐ ┌──────────────────────────┐ │
-                        │ │  实例 @3000 (活动/备用)  │ │  实例 @3001 (活动/备用)  │ │
+                        │ │ amll-api-blue (@3000)    │ │ amll-api-green (@3001)   │ │
                         │ └─────────────┬────────────┘ └─────────────┬────────────┘ │
                         └───────────────┼────────────────────────────┼──────────────┘
-                                        │                            │
+                                        │ (Volume /data, /var/lib/..)│
                                         ▼                            ▼
                         ┌──────────────────────────────────────────────────────────┐
                         │   环境变量配置文件 (服务器保密): /etc/amll-ttml-api/env  │
@@ -32,7 +32,7 @@
                         └──────────────────────────────────────────────────────────┘
 ```
 
-* **无缝热更新 (Zero-Downtime)**：利用 Systemd 模板服务 (`amll-ttml-api@.service`) 在端口 3000 与 3001 之间平滑热切换，配合健康检查与 Nginx 重载，实现发布更新时用户完全零感停机。
+* **无缝热更新 (Zero-Downtime)**：利用双容器插槽（`amll-api-blue` 端口 3000 与 `amll-api-green` 端口 3001）平滑交替轮换，配合健康检查与 Nginx 重载，实现发布更新时外部请求完全零感停机。
 * **配置与代码解耦**：所有敏感密钥（`SENTRY_DSN`、`SYNC_SECRET`、`ANALYTICS_IP_KEY`、`ANALYTICS_SECRET`）独立保存在服务器本地 `/etc/amll-ttml-api/env`，绝不提交至代码仓库。
 
 ---
@@ -235,13 +235,15 @@ sudo nginx -t && sudo nginx -s reload
 当需要发布新版本时：
 1. 打开 GitHub 仓库页面，进入 `Actions` 选项卡。
 2. 选择 **Build and Deploy** 工作流。
-3. 点击 **Run workflow** 手动触发构建与无缝部署。
+3. 点击 **Run workflow** 手动触发构建与无缝部署（可输入指定 Tag 或留空使用默认的 Commit SHA 与 latest）。
 
 自动化脚本流会自动完成：
-- 交叉编译 Linux 64位二进制。
-- `scp` 传输新版可执行文件与部署脚本到服务器。
-- 启动目标端口实例、执行自动健康检查 (`/v1/status`)。
-- 健康检查成功后自动重载 Nginx upstream 指向新端口，最后优雅停止旧端口服务。
+- 通过 Docker Buildx 与 `cargo-chef` 缓存构建生产容器镜像，并推送到 GitHub Container Registry (`ghcr.io/amll-dev/amll-ttml-api`)。
+- 通过 SSH 将部署脚本 `scripts/deploy-docker.sh` 传输到服务器。
+- 在服务器上拉取新镜像，并根据当前运行状态启动对侧备用容器（3000 端口 `amll-api-blue` 或 3001 端口 `amll-api-green`）。
+- 执行容器健康探活检查 (`/api/v1/status`)。
+- 探活成功后原子覆盖 Nginx upstream 配置，平滑重载 Nginx。
+- 向旧容器发送优雅下线信号（等待在途请求处理与分析数据刷盘），最后清理废弃容器与悬空镜像。
 
 ---
 
@@ -249,21 +251,22 @@ sudo nginx -t && sudo nginx -s reload
 
 ### 6.1 查看服务运行状态
 ```bash
-# 查看 3000 或 3001 端口服务状态
-sudo systemctl status amll-ttml-api@3000.service
-sudo systemctl status amll-ttml-api@3001.service
+# 查看当前正在运行的容器与资源占用
+docker ps -f "name=amll-api"
+docker stats --no-stream
 
-# 查看活动 Nginx 指向的后端端口
+# 查看当前 Nginx 指向的后端端口
 cat /etc/nginx/conf.d/amll_upstream.conf
 ```
 
 ### 6.2 实时日志查看
 ```bash
-# 查看最近 100 行 API 实时日志
-sudo journalctl -u amll-ttml-api@3000.service -f -n 100
-sudo journalctl -u amll-ttml-api@3001.service -f -n 100
+# 实时跟踪活动容器的日志
+docker logs -f --tail 100 amll-api-blue
+# 或若是 green 槽位:
+docker logs -f --tail 100 amll-api-green
 
-# 查看 Nginx 错误日志
+# 查看 Nginx 访问与错误日志
 sudo tail -f /var/log/nginx/amll-api-error.log
 ```
 
@@ -274,13 +277,21 @@ sudo tail -f /var/log/nginx/amll-api-error.log
 # 1. 编辑环境变量文件
 sudo nano /etc/amll-ttml-api/env
 
-# 2. 重启服务使新配置生效
-sudo systemctl restart amll-ttml-api@3000.service
-# 或重启另一个端口服务
-sudo systemctl restart amll-ttml-api@3001.service
+# 2. 重启当前活动容器使配置生效
+docker restart amll-api-blue
+# 或若当前是 green 槽位:
+docker restart amll-api-green
 ```
 
-### 6.4 请求统计
+### 6.4 快速故障回滚
+如果新发布的版本存在非预期缺陷，可通过指定历史稳定的镜像 Tag/Commit SHA 快速秒级回滚：
+
+```bash
+# 在服务器上手动执行回滚至指定镜像版本 (例如 sha-44cf460)
+bash /tmp/deploy-docker.sh sha-44cf460
+```
+
+### 6.5 请求统计
 设置了 `ANALYTICS_DIR` 后，服务会把每个 HTTP 请求先记录到 `$ANALYTICS_DIR/buffer.db`（SQLite，WAL 模式，目录不存在时自动创建）；每个北京时间自然日收齐后（0 点 10 分之后），自动转成 `$ANALYTICS_DIR/parquet/YYYY-MM-DD.parquet` 并从缓冲库删掉。蓝绿两个实例共用同一个目录，同一天只会被转换一次。
 
 * **客户端标识**：只存 `X-Real-IP` 的 HMAC 摘要，不存原始 IP。需要封禁时用 Nginx access log 里的原始 IP。未设置 `ANALYTICS_IP_KEY` 时照常记录，只是客户端标识留空，并在启动时报错上报 Sentry；更换密钥等同于独立客户端重新开始计数。
