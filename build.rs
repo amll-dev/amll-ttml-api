@@ -4,35 +4,41 @@ fn main() {
     println!("cargo:rerun-if-changed=.git/HEAD");
     println!("cargo:rerun-if-changed=.git/refs/");
 
-    let git_hash = std::env::var("GIT_HASH").ok().filter(|s| !s.is_empty()).unwrap_or_else(|| {
-        Command::new("git")
-            .args(["rev-parse", "--short", "HEAD"])
-            .output()
-            .ok()
-            .and_then(|output| {
-                if output.status.success() {
-                    String::from_utf8(output.stdout).ok()
-                } else {
-                    None
-                }
-            })
-            .map_or_else(|| "unknown".to_string(), |s| s.trim().to_string())
-    });
+    let git_hash = std::env::var("GIT_HASH")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| {
+            Command::new("git")
+                .args(["rev-parse", "--short", "HEAD"])
+                .output()
+                .ok()
+                .and_then(|output| {
+                    if output.status.success() {
+                        String::from_utf8(output.stdout).ok()
+                    } else {
+                        None
+                    }
+                })
+                .map_or_else(|| "unknown".to_string(), |s| s.trim().to_string())
+        });
 
-    let git_date = std::env::var("GIT_COMMIT_DATE").ok().filter(|s| !s.is_empty()).unwrap_or_else(|| {
-        Command::new("git")
-            .args(["log", "-1", "--format=%ci"])
-            .output()
-            .ok()
-            .and_then(|output| {
-                if output.status.success() {
-                    String::from_utf8(output.stdout).ok()
-                } else {
-                    None
-                }
-            })
-            .map_or_else(|| "unknown".to_string(), |s| s.trim().to_string())
-    });
+    let git_date = std::env::var("GIT_COMMIT_DATE")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| {
+            Command::new("git")
+                .args(["log", "-1", "--format=%ci"])
+                .output()
+                .ok()
+                .and_then(|output| {
+                    if output.status.success() {
+                        String::from_utf8(output.stdout).ok()
+                    } else {
+                        None
+                    }
+                })
+                .map_or_else(|| "unknown".to_string(), |s| s.trim().to_string())
+        });
 
     let rustc_version = Command::new("rustc")
         .arg("--version")
