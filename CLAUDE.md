@@ -277,6 +277,6 @@ CORS 与 Trace 之内），为响应生成 `ETag` 并处理 `If-None-Match`，�
 
 ## 部署
 
-GitHub Actions（`workflow_dispatch` 手动触发）交叉编译后 scp 到服务器，执行 `scripts/deploy-remote.sh`：
-在 3000/3001 两个 systemd 实例间蓝绿切换，新端口通过 `/api/v1/status` 健康检查后才改 Nginx upstream
-并停旧实例，检查失败则保留旧版本。环境变量由 `/etc/amll-ttml-api/env` 提供（见 `.env.example`）。
+GitHub Actions（`workflow_dispatch` 手动触发）构建容器镜像推送到 GitHub Packages (GHCR)，并通过 SSH 到服务器执行 `scripts/deploy-docker.sh`：
+在 3000 (`amll-api-blue`) 与 3001 (`amll-api-green`) 两个 Docker 容器间蓝绿切换，新端口通过 `/api/v1/status` 健康检查后才改 Nginx upstream
+并优雅停用旧容器，检查失败则保留旧版本。环境变量由宿主机 `/etc/amll-ttml-api/env` 提供（见 `.env.example` 与 `deployment.md`）。
