@@ -82,6 +82,7 @@ echo "[5/6] 健康检查通过，原子切换 Nginx Upstream 至端口 ${TARGET_
 sudo bash -c "cat <<EOF > $UPSTREAM_CONF
 upstream amll_api_backend {
     server 127.0.0.1:${TARGET_PORT};
+    keepalive 32;
 }
 EOF"
 

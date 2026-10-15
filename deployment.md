@@ -78,6 +78,20 @@ sudo chmod 600 /etc/amll-ttml-api/env
 sudo cat /etc/amll-ttml-api/env
 ```
 
+### 2.3 内核连接跟踪与网络参数调优
+为避免高峰期流量导致 Linux 内核连接跟踪表（`nf_conntrack`）满载丢包（导致反代 499 / 504 错误），配置内核参数：
+
+```bash
+sudo bash -c 'cat <<EOF > /etc/sysctl.d/99-conntrack.conf
+net.netfilter.nf_conntrack_max = 65536
+net.netfilter.nf_conntrack_tcp_timeout_established = 1800
+net.netfilter.nf_conntrack_tcp_timeout_time_wait = 30
+EOF'
+
+# 即时生效
+sudo sysctl -p /etc/sysctl.d/99-conntrack.conf
+```
+
 ---
 
 ## 3. Systemd 服务模版配置
@@ -119,6 +133,7 @@ sudo systemctl daemon-reload
 sudo bash -c 'cat <<EOF > /etc/nginx/conf.d/amll_upstream.conf
 upstream amll_api_backend {
     server 127.0.0.1:3000;
+    keepalive 32;
 }
 EOF'
 ```
@@ -192,6 +207,8 @@ server {
 
     location / {
         proxy_pass http://amll_api_backend;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
 
         limit_req zone=apilimit burst=50 nodelay;
 
